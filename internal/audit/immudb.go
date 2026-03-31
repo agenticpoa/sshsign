@@ -33,15 +33,12 @@ func NewImmuDBLogger(cfg ImmuDBConfig) (*ImmuDBLogger, error) {
 		WithAddress(cfg.Address).
 		WithPort(cfg.Port)
 
-	client, err := immudb.NewImmuClient(opts)
-	if err != nil {
-		return nil, fmt.Errorf("creating immudb client: %w", err)
-	}
+	client := immudb.NewClient().WithOptions(opts)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	err = client.OpenSession(ctx, []byte(cfg.Username), []byte(cfg.Password), cfg.Database)
+	err := client.OpenSession(ctx, []byte(cfg.Username), []byte(cfg.Password), cfg.Database)
 	if err != nil {
 		return nil, fmt.Errorf("opening immudb session: %w", err)
 	}
@@ -49,7 +46,6 @@ func NewImmuDBLogger(cfg ImmuDBConfig) (*ImmuDBLogger, error) {
 	l := &ImmuDBLogger{client: client}
 	l.healthy.Store(true)
 
-	// Start health check goroutine
 	go l.healthCheckLoop()
 
 	return l, nil
@@ -77,7 +73,6 @@ func (l *ImmuDBLogger) Log(entry Entry) (uint64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// VerifiedSet ensures the write is tamper-proof
 	hdr, err := l.client.VerifiedSet(ctx, []byte(key), data)
 	if err != nil {
 		l.healthy.Store(false)
@@ -103,7 +98,6 @@ func (l *ImmuDBLogger) Verify(key string) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// VerifiedGet automatically validates the Merkle proof
 	_, err := l.client.VerifiedGet(ctx, []byte(key))
 	if err != nil {
 		return false, fmt.Errorf("verification failed: %w", err)
