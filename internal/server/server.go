@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/bubbletea"
+	"github.com/muesli/termenv"
 
 	"github.com/agenticpoa/sshsign/internal/audit"
 	"github.com/agenticpoa/sshsign/internal/config"
@@ -27,8 +28,8 @@ func New(cfg config.Config, db *sql.DB, kek []byte, auditLog audit.Logger) (*ssh
 		wish.WithHostKeyPath(cfg.HostKeyPath),
 		wish.WithPublicKeyAuth(PublicKeyHandler()),
 		wish.WithMiddleware(
-			// Bubbletea middleware runs for PTY sessions
-			bubbletea.Middleware(tuiHandler(db, kek)),
+			// Bubbletea middleware runs for PTY sessions, force ANSI256 colors
+			bubbletea.MiddlewareWithColorProfile(tuiHandler(db, kek), termenv.ANSI256),
 			// Session handler runs first: user lookup/create, command routing
 			SessionHandler(db, kek, rl, auditLog),
 		),
