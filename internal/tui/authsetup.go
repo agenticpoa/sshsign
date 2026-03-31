@@ -285,11 +285,11 @@ func (m Model) viewAuthSetup() string {
 
 	// Header: adapt based on context
 	if m.authSetup.fromWizard {
-		b.WriteString(successStyle.Render(fmt.Sprintf("  New signing key: %s", m.authSetup.selectedKeyID)))
+		b.WriteString(m.s.Success.Render(fmt.Sprintf("  New signing key: %s", m.authSetup.selectedKeyID)))
 	} else {
-		b.WriteString(titleStyle.Render("  Update Key"))
+		b.WriteString(m.s.Title.Render("  Update Key"))
 		b.WriteString("  ")
-		b.WriteString(dimStyle.Render(m.authSetup.selectedKeyID))
+		b.WriteString(m.s.Dim.Render(m.authSetup.selectedKeyID))
 	}
 	b.WriteString("\n\n")
 
@@ -298,20 +298,20 @@ func (m Model) viewAuthSetup() string {
 
 	switch m.authSetup.step {
 	case stepSelectKey:
-		b.WriteString(titleStyle.Render(fmt.Sprintf("  Step %d/%d", stepNum, totalSteps)))
+		b.WriteString(m.s.Title.Render(fmt.Sprintf("  Step %d/%d", stepNum, totalSteps)))
 		b.WriteString("  ")
-		b.WriteString(infoStyle.Render("Select a signing key"))
+		b.WriteString(m.s.Info.Render("Select a signing key"))
 		b.WriteString("\n\n")
 
 		if len(m.authSetup.keys) == 0 {
-			b.WriteString(dimStyle.Render("  No active signing keys. Create one first."))
+			b.WriteString(m.s.Dim.Render("  No active signing keys. Create one first."))
 		} else {
 			for i, key := range m.authSetup.keys {
 				cursor := "  "
-				style := normalStyle
+				style := m.s.Normal
 				if i == m.authSetup.cursor {
 					cursor = "> "
-					style = selectedStyle
+					style = m.s.Selected
 				}
 				b.WriteString(style.Render(fmt.Sprintf("%s%s", cursor, key.KeyID)))
 				b.WriteString("\n")
@@ -319,35 +319,35 @@ func (m Model) viewAuthSetup() string {
 		}
 
 	case stepRepoConstraint:
-		b.WriteString(titleStyle.Render(fmt.Sprintf("  Step %d/%d", stepNum, totalSteps)))
+		b.WriteString(m.s.Title.Render(fmt.Sprintf("  Step %d/%d", stepNum, totalSteps)))
 		b.WriteString("  ")
-		b.WriteString(infoStyle.Render("Repository constraint"))
+		b.WriteString(m.s.Info.Render("Repository constraint"))
 		b.WriteString("\n\n")
 
-		b.WriteString(dimStyle.Render("  Limit which repos this key can sign for."))
+		b.WriteString(m.s.Dim.Render("  Limit which repos this key can sign for."))
 		b.WriteString("\n")
-		b.WriteString(dimStyle.Render("  Use wildcards like github.com/user/*"))
+		b.WriteString(m.s.Dim.Render("  Use wildcards like github.com/user/*"))
 		b.WriteString("\n")
-		b.WriteString(dimStyle.Render("  Leave empty to allow all repos."))
+		b.WriteString(m.s.Dim.Render("  Leave empty to allow all repos."))
 		b.WriteString("\n\n")
 
 		b.WriteString("  " + m.authSetup.repoInput.View())
 
 	case stepSelectRules:
-		b.WriteString(titleStyle.Render(fmt.Sprintf("  Step %d/%d", stepNum, totalSteps)))
+		b.WriteString(m.s.Title.Render(fmt.Sprintf("  Step %d/%d", stepNum, totalSteps)))
 		b.WriteString("  ")
-		b.WriteString(infoStyle.Render("Signing rules"))
+		b.WriteString(m.s.Info.Render("Signing rules"))
 		b.WriteString("\n\n")
 
-		b.WriteString(dimStyle.Render("  Select rules to enforce. Hard rules block signing."))
+		b.WriteString(m.s.Dim.Render("  Select rules to enforce. Hard rules block signing."))
 		b.WriteString("\n\n")
 
 		for i, r := range m.authSetup.rules {
 			cursor := "  "
-			style := normalStyle
+			style := m.s.Normal
 			if i == m.authSetup.ruleCursor {
 				cursor = "> "
-				style = selectedStyle
+				style = m.s.Selected
 			}
 
 			check := "[ ]"
@@ -359,47 +359,47 @@ func (m Model) viewAuthSetup() string {
 			b.WriteString("\n")
 
 			if i == m.authSetup.ruleCursor {
-				b.WriteString(dimStyle.Render(fmt.Sprintf("      %s", r.def.Description)))
+				b.WriteString(m.s.Dim.Render(fmt.Sprintf("      %s", r.def.Description)))
 				b.WriteString("\n")
 			}
 		}
 
 	case stepExpiry:
-		b.WriteString(titleStyle.Render(fmt.Sprintf("  Step %d/%d", stepNum, totalSteps)))
+		b.WriteString(m.s.Title.Render(fmt.Sprintf("  Step %d/%d", stepNum, totalSteps)))
 		b.WriteString("  ")
-		b.WriteString(infoStyle.Render("Expiration"))
+		b.WriteString(m.s.Info.Render("Expiration"))
 		b.WriteString("\n\n")
 
-		b.WriteString(dimStyle.Render("  How long should this authorization last?"))
+		b.WriteString(m.s.Dim.Render("  How long should this authorization last?"))
 		b.WriteString("\n\n")
 
-		b.WriteString(infoStyle.Render(fmt.Sprintf("  %d days", m.authSetup.expiryDays)))
+		b.WriteString(m.s.Info.Render(fmt.Sprintf("  %d days", m.authSetup.expiryDays)))
 		b.WriteString("\n")
 
 	case stepConfirm:
-		b.WriteString(titleStyle.Render(fmt.Sprintf("  Step %d/%d", stepNum, totalSteps)))
+		b.WriteString(m.s.Title.Render(fmt.Sprintf("  Step %d/%d", stepNum, totalSteps)))
 		b.WriteString("  ")
 		if m.authSetup.fromWizard {
-			b.WriteString(infoStyle.Render("Review and activate key"))
+			b.WriteString(m.s.Info.Render("Review and activate key"))
 		} else {
-			b.WriteString(infoStyle.Render("Review and update key"))
+			b.WriteString(m.s.Info.Render("Review and update key"))
 		}
 		b.WriteString("\n\n")
 
-		b.WriteString(infoLabelStyle.Render("  Key      "))
-		b.WriteString(infoStyle.Render(m.authSetup.selectedKeyID))
+		b.WriteString(m.s.InfoLabel.Render("  Key      "))
+		b.WriteString(m.s.Info.Render(m.authSetup.selectedKeyID))
 		b.WriteString("\n")
-		b.WriteString(infoLabelStyle.Render("  Scope    "))
-		b.WriteString(infoStyle.Render("git-commit"))
+		b.WriteString(m.s.InfoLabel.Render("  Scope    "))
+		b.WriteString(m.s.Info.Render("git-commit"))
 		b.WriteString("\n")
 
 		repo := strings.TrimSpace(m.authSetup.repoInput.Value())
 		if repo != "" {
-			b.WriteString(infoLabelStyle.Render("  Repo     "))
-			b.WriteString(infoStyle.Render(repo))
+			b.WriteString(m.s.InfoLabel.Render("  Repo     "))
+			b.WriteString(m.s.Info.Render(repo))
 		} else {
-			b.WriteString(infoLabelStyle.Render("  Repo     "))
-			b.WriteString(dimStyle.Render("any"))
+			b.WriteString(m.s.InfoLabel.Render("  Repo     "))
+			b.WriteString(m.s.Dim.Render("any"))
 		}
 		b.WriteString("\n")
 
@@ -410,61 +410,61 @@ func (m Model) viewAuthSetup() string {
 			}
 		}
 		if len(selected) > 0 {
-			b.WriteString(infoLabelStyle.Render("  Rules    "))
-			b.WriteString(infoStyle.Render(selected[0]))
+			b.WriteString(m.s.InfoLabel.Render("  Rules    "))
+			b.WriteString(m.s.Info.Render(selected[0]))
 			b.WriteString("\n")
 			for _, s := range selected[1:] {
-				b.WriteString(infoLabelStyle.Render("           "))
-				b.WriteString(infoStyle.Render(s))
+				b.WriteString(m.s.InfoLabel.Render("           "))
+				b.WriteString(m.s.Info.Render(s))
 				b.WriteString("\n")
 			}
 		} else {
-			b.WriteString(infoLabelStyle.Render("  Rules    "))
-			b.WriteString(dimStyle.Render("none"))
+			b.WriteString(m.s.InfoLabel.Render("  Rules    "))
+			b.WriteString(m.s.Dim.Render("none"))
 			b.WriteString("\n")
 		}
 
-		b.WriteString(infoLabelStyle.Render("  Expires  "))
-		b.WriteString(infoStyle.Render(fmt.Sprintf("%d days", m.authSetup.expiryDays)))
+		b.WriteString(m.s.InfoLabel.Render("  Expires  "))
+		b.WriteString(m.s.Info.Render(fmt.Sprintf("%d days", m.authSetup.expiryDays)))
 		b.WriteString("\n\n")
 
 		if m.authSetup.fromWizard {
-			b.WriteString(selectedStyle.Render("  Activate key? (y/n)"))
+			b.WriteString(m.s.Selected.Render("  Activate key? (y/n)"))
 		} else {
-			b.WriteString(selectedStyle.Render("  Update key? (y/n)"))
+			b.WriteString(m.s.Selected.Render("  Update key? (y/n)"))
 		}
 	}
 
 	if m.authSetup.status != "" {
 		b.WriteString("\n\n")
 		if m.authSetup.isError {
-			b.WriteString(errorStyle.Render("  " + m.authSetup.status))
+			b.WriteString(m.s.Error.Render("  " + m.authSetup.status))
 		} else {
-			b.WriteString(successStyle.Render("  " + m.authSetup.status))
+			b.WriteString(m.s.Success.Render("  " + m.authSetup.status))
 		}
 	}
 
 	b.WriteString("\n\n")
 	switch m.authSetup.step {
 	case stepSelectRules:
-		b.WriteString(buildHints([]hint{
+		b.WriteString(m.buildHints([]hint{
 			{"space", "toggle", hintAction},
 			{"j/k", "navigate", hintNav},
 			{"enter", "next", hintAction},
 			{"esc", "back", hintNav},
 		}))
 	case stepExpiry:
-		b.WriteString(buildHints([]hint{
+		b.WriteString(m.buildHints([]hint{
 			{"j/k", "adjust", hintNav},
 			{"enter", "next", hintAction},
 			{"esc", "back", hintNav},
 		}))
 	default:
-		b.WriteString(buildHints([]hint{
+		b.WriteString(m.buildHints([]hint{
 			{"enter", "next", hintAction},
 			{"esc", "back", hintNav},
 		}))
 	}
 
-	return borderStyle.Render(b.String())
+	return m.s.Border.Render(b.String())
 }

@@ -7,7 +7,7 @@ type hintKind int
 const (
 	hintAction hintKind = iota // teal
 	hintDanger                 // red
-	hintNav                    // purple
+	hintNav                    // teal (navigation)
 )
 
 type hint struct {
@@ -16,22 +16,22 @@ type hint struct {
 	kind  hintKind
 }
 
-func buildHints(hints []hint) string {
+func (m Model) buildHints(hints []hint) string {
 	var b strings.Builder
 	b.WriteString("  ")
 	for i, h := range hints {
 		if i > 0 {
-			b.WriteString(hintSepStyle.Render("  "))
+			b.WriteString(m.s.HintSep.Render("  "))
 		}
 		switch h.kind {
 		case hintAction:
-			b.WriteString(hintKeyStyle.Render(h.key))
+			b.WriteString(m.s.HintKey.Render(h.key))
 		case hintDanger:
-			b.WriteString(hintDangerStyle.Render(h.key))
+			b.WriteString(m.s.HintDanger.Render(h.key))
 		case hintNav:
-			b.WriteString(hintNavStyle.Render(h.key))
+			b.WriteString(m.s.HintNav.Render(h.key))
 		}
-		b.WriteString(dimStyle.Render(" " + h.label))
+		b.WriteString(m.s.Dim.Render(" " + h.label))
 	}
 	return b.String()
 }

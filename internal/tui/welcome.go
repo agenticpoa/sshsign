@@ -158,7 +158,6 @@ func (m Model) handleCreateKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Flow directly into authorization setup with this key pre-selected
 	m.authSetup = newAuthSetupModelForKey(m.db, m.user, sk.KeyID)
 	m.screen = screenAuthSetup
 	return m, nil
@@ -166,33 +165,33 @@ func (m Model) handleCreateKey() (tea.Model, tea.Cmd) {
 
 func (m Model) viewWelcome() string {
 	var b strings.Builder
+	s := m.s
 
-	b.WriteString("\n") // push content below any terminal status bar artifacts
-	// ASCII art logo: green > with teal sshsign
-	b.WriteString(logoPromptStyle.Render(" /\\   ") + titleStyle.Render("          _"))
 	b.WriteString("\n")
-	b.WriteString(logoPromptStyle.Render(" \\ \\  ") + titleStyle.Render("  ___ ___| |__  ___(_) __ _ _ __"))
+	b.WriteString(s.LogoPrompt.Render(" /\\   ") + s.Title.Render("          _"))
 	b.WriteString("\n")
-	b.WriteString(logoPromptStyle.Render("  > > ") + titleStyle.Render(" / __/ __| '_ \\/ __| |/ _` | '_ \\"))
+	b.WriteString(s.LogoPrompt.Render(" \\ \\  ") + s.Title.Render("  ___ ___| |__  ___(_) __ _ _ __"))
 	b.WriteString("\n")
-	b.WriteString(logoPromptStyle.Render(" / /  ") + titleStyle.Render(" \\__ \\__ \\ | | \\__ \\ | (_| | | | |"))
+	b.WriteString(s.LogoPrompt.Render("  > > ") + s.Title.Render(" / __/ __| '_ \\/ __| |/ _` | '_ \\"))
 	b.WriteString("\n")
-	b.WriteString(logoPromptStyle.Render(" \\/   ") + titleStyle.Render(" |___/___/_| |_|___/_|\\__, |_| |_|"))
+	b.WriteString(s.LogoPrompt.Render(" / /  ") + s.Title.Render(" \\__ \\__ \\ | | \\__ \\ | (_| | | | |"))
 	b.WriteString("\n")
-	b.WriteString(logoPromptStyle.Render("      ") + titleStyle.Render("                      |___/"))
+	b.WriteString(s.LogoPrompt.Render(" \\/   ") + s.Title.Render(" |___/___/_| |_|___/_|\\__, |_| |_|"))
+	b.WriteString("\n")
+	b.WriteString(s.LogoPrompt.Render("      ") + s.Title.Render("                      |___/"))
 	b.WriteString("\n\n")
 
 	if m.user != nil {
-		b.WriteString(infoLabelStyle.Render("  User    "))
-		b.WriteString(infoStyle.Render(m.user.UserID))
+		b.WriteString(s.InfoLabel.Render("  User    "))
+		b.WriteString(s.Info.Render(m.user.UserID))
 		b.WriteString("\n")
 		if m.userKey != nil {
 			fp := m.userKey.SSHFingerprint
 			if len(fp) > 40 {
 				fp = fp[:40] + "..."
 			}
-			b.WriteString(infoLabelStyle.Render("  Key     "))
-			b.WriteString(infoStyle.Render(fp))
+			b.WriteString(s.InfoLabel.Render("  Key     "))
+			b.WriteString(s.Info.Render(fp))
 			b.WriteString("\n")
 		}
 		if !m.isNewUser && m.db != nil {
@@ -205,8 +204,8 @@ func (m Model) viewWelcome() string {
 					active++
 				}
 			}
-			b.WriteString(infoLabelStyle.Render("  Signs   "))
-			b.WriteString(infoStyle.Render(fmt.Sprintf("%d active, %d revoked", active, revoked)))
+			b.WriteString(s.InfoLabel.Render("  Signs   "))
+			b.WriteString(s.Info.Render(fmt.Sprintf("%d active, %d revoked", active, revoked)))
 			b.WriteString("\n")
 		}
 	}
@@ -215,13 +214,13 @@ func (m Model) viewWelcome() string {
 
 	for i, item := range m.welcome.items {
 		cursor := "  "
-		style := normalStyle
+		style := s.Normal
 		if item == menuExit {
-			style = exitStyle
+			style = s.Exit
 		}
 		if i == m.welcome.cursor {
 			cursor = "> "
-			style = selectedStyle
+			style = s.Selected
 		}
 		b.WriteString(style.Render(cursor + menuLabel(item)))
 		b.WriteString("\n")
@@ -230,18 +229,18 @@ func (m Model) viewWelcome() string {
 	if m.welcome.status != "" {
 		b.WriteString("\n")
 		if m.welcome.isError {
-			b.WriteString(errorStyle.Render("  " + m.welcome.status))
+			b.WriteString(s.Error.Render("  " + m.welcome.status))
 		} else {
-			b.WriteString(successStyle.Render("  " + m.welcome.status))
+			b.WriteString(s.Success.Render("  " + m.welcome.status))
 		}
 	}
 
 	b.WriteString("\n")
-	b.WriteString(buildHints([]hint{
+	b.WriteString(m.buildHints([]hint{
 		{"j/k", "navigate", hintNav},
 		{"enter", "select", hintAction},
 		{"q", "quit", hintNav},
 	}))
 
-	return borderStyle.Render(b.String())
+	return s.Border.Render(b.String())
 }

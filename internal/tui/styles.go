@@ -2,69 +2,55 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
-var (
-	logoPromptStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("2")) // green >
+// Styles holds all TUI styles, bound to a specific lipgloss renderer.
+// This is necessary for SSH sessions where each connection needs its own renderer.
+type Styles struct {
+	LogoPrompt  lipgloss.Style
+	Title       lipgloss.Style
+	LogoSign    lipgloss.Style
+	Tagline     lipgloss.Style
+	Subtitle    lipgloss.Style
+	Info        lipgloss.Style
+	InfoLabel   lipgloss.Style
+	Selected    lipgloss.Style
+	Normal      lipgloss.Style
+	Exit        lipgloss.Style
+	Error       lipgloss.Style
+	Success     lipgloss.Style
+	Dim         lipgloss.Style
+	Border      lipgloss.Style
+	Divider     lipgloss.Style
+	HintKey     lipgloss.Style
+	HintDanger  lipgloss.Style
+	HintNav     lipgloss.Style
+	HintSep     lipgloss.Style
+}
 
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("6")).
-			MarginBottom(0)
+func NewStyles(r *lipgloss.Renderer) Styles {
+	return Styles{
+		LogoPrompt: r.NewStyle().Bold(true).Foreground(lipgloss.Color("2")),
+		Title:      r.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).MarginBottom(0),
+		LogoSign:   r.NewStyle().Italic(true).Foreground(lipgloss.Color("6")),
+		Tagline:    r.NewStyle().Foreground(lipgloss.Color("241")).MarginBottom(1),
+		Subtitle:   r.NewStyle().Foreground(lipgloss.Color("241")),
+		Info:       r.NewStyle().Foreground(lipgloss.Color("252")),
+		InfoLabel:  r.NewStyle().Foreground(lipgloss.Color("241")),
+		Selected:   r.NewStyle().Foreground(lipgloss.Color("6")).Bold(true),
+		Normal:     r.NewStyle().Foreground(lipgloss.Color("252")),
+		Exit:       r.NewStyle().Foreground(lipgloss.Color("241")),
+		Error:      r.NewStyle().Foreground(lipgloss.Color("196")),
+		Success:    r.NewStyle().Foreground(lipgloss.Color("82")),
+		Dim:        r.NewStyle().Foreground(lipgloss.Color("241")),
+		Border:     r.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("237")).Padding(0, 2),
+		Divider:    r.NewStyle().Foreground(lipgloss.Color("237")),
+		HintKey:    r.NewStyle().Foreground(lipgloss.Color("6")),
+		HintDanger: r.NewStyle().Foreground(lipgloss.Color("196")),
+		HintNav:    r.NewStyle().Foreground(lipgloss.Color("6")),
+		HintSep:    r.NewStyle().Foreground(lipgloss.Color("237")),
+	}
+}
 
-	logoSignStyle = lipgloss.NewStyle().
-			Italic(true).
-			Foreground(lipgloss.Color("6"))
-
-	taglineStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241")).
-			MarginBottom(1)
-
-	subtitleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
-
-	infoStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252"))
-
-	infoLabelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
-
-	selectedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("6")).
-			Bold(true)
-
-	normalStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252"))
-
-	exitStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
-
-	errorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196"))
-
-	successStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("82"))
-
-	dimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
-
-	borderStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("237")).
-			Padding(0, 2)
-
-	dividerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("237"))
-
-	hintKeyStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("6")) // teal for action keys
-
-	hintDangerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")) // red for destructive keys
-
-	hintNavStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("99")) // purple for navigation keys
-
-	hintSepStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("237")) // dim separator
-)
+// DefaultStyles returns styles using the default renderer (for local/testing).
+func DefaultStyles() Styles {
+	return NewStyles(lipgloss.DefaultRenderer())
+}

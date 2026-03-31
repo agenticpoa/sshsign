@@ -153,23 +153,23 @@ func (m Model) viewManageKeys() string {
 func (m Model) viewKeyList() string {
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render("Manage Keys"))
+	b.WriteString(m.s.Title.Render("Manage Keys"))
 	b.WriteString("\n\n")
 
 	if len(m.manageKeys.keys) == 0 {
-		b.WriteString(dimStyle.Render("  No signing keys yet."))
+		b.WriteString(m.s.Dim.Render("  No signing keys yet."))
 	} else {
 		for i, key := range m.manageKeys.keys {
 			cursor := "  "
-			style := normalStyle
+			style := m.s.Normal
 			if i == m.manageKeys.cursor {
 				cursor = "> "
-				style = selectedStyle
+				style = m.s.Selected
 			}
 
-			status := successStyle.Render("active")
+			status := m.s.Success.Render("active")
 			if key.RevokedAt != nil {
-				status = errorStyle.Render("revoked")
+				status = m.s.Error.Render("revoked")
 			}
 
 			// Count authorizations
@@ -180,7 +180,7 @@ func (m Model) viewKeyList() string {
 				authLabel += "s"
 			}
 
-			line := fmt.Sprintf("%s  [%s]  %s", key.KeyID, status, dimStyle.Render(authLabel))
+			line := fmt.Sprintf("%s  [%s]  %s", key.KeyID, status, m.s.Dim.Render(authLabel))
 			b.WriteString(style.Render(cursor) + line)
 			b.WriteString("\n")
 		}
@@ -189,20 +189,20 @@ func (m Model) viewKeyList() string {
 	if m.manageKeys.status != "" {
 		b.WriteString("\n")
 		if m.manageKeys.isError {
-			b.WriteString(errorStyle.Render("  " + m.manageKeys.status))
+			b.WriteString(m.s.Error.Render("  " + m.manageKeys.status))
 		} else {
-			b.WriteString(successStyle.Render("  " + m.manageKeys.status))
+			b.WriteString(m.s.Success.Render("  " + m.manageKeys.status))
 		}
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(buildHints([]hint{
+	b.WriteString(m.buildHints([]hint{
 		{"enter", "manage", hintAction},
 		{"r", "revoke key", hintDanger},
 		{"esc", "back", hintNav},
 	}))
 
-	return borderStyle.Render(b.String())
+	return m.s.Border.Render(b.String())
 }
 
 func (m Model) viewKeyDetail() string {
@@ -210,60 +210,60 @@ func (m Model) viewKeyDetail() string {
 
 	key := m.manageKeys.keys[m.manageKeys.cursor]
 
-	b.WriteString(titleStyle.Render("Key"))
+	b.WriteString(m.s.Title.Render("Key"))
 	b.WriteString("  ")
-	b.WriteString(infoStyle.Render(key.KeyID))
+	b.WriteString(m.s.Info.Render(key.KeyID))
 
-	status := successStyle.Render("active")
+	status := m.s.Success.Render("active")
 	if key.RevokedAt != nil {
-		status = errorStyle.Render("revoked")
+		status = m.s.Error.Render("revoked")
 	}
 	b.WriteString("  ")
 	b.WriteString(status)
 	b.WriteString("\n\n")
 
-	b.WriteString(infoLabelStyle.Render("  Public   "))
-	b.WriteString(dimStyle.Render(truncate(key.PublicKey, 45)))
+	b.WriteString(m.s.InfoLabel.Render("  Public   "))
+	b.WriteString(m.s.Dim.Render(truncate(key.PublicKey, 45)))
 	b.WriteString("\n")
-	b.WriteString(infoLabelStyle.Render("  Created  "))
-	b.WriteString(dimStyle.Render(key.CreatedAt.Format("2006-01-02 15:04")))
+	b.WriteString(m.s.InfoLabel.Render("  Created  "))
+	b.WriteString(m.s.Dim.Render(key.CreatedAt.Format("2006-01-02 15:04")))
 	b.WriteString("\n\n")
 
 	if len(m.manageKeys.auths) == 0 {
-		b.WriteString(dimStyle.Render("  No authorizations. This key cannot sign anything."))
+		b.WriteString(m.s.Dim.Render("  No authorizations. This key cannot sign anything."))
 		b.WriteString("\n")
 	} else {
-		b.WriteString(infoStyle.Render("  Authorizations:"))
+		b.WriteString(m.s.Info.Render("  Authorizations:"))
 		b.WriteString("\n\n")
 
 		for i, auth := range m.manageKeys.auths {
 			cursor := "  "
-			style := normalStyle
+			style := m.s.Normal
 			if i == m.manageKeys.authCursor {
 				cursor = "> "
-				style = selectedStyle
+				style = m.s.Selected
 			}
 
 			scopes := strings.Join(auth.Scopes, ", ")
 			b.WriteString(style.Render(fmt.Sprintf("%s%s", cursor, auth.TokenID)))
 			b.WriteString("  ")
-			b.WriteString(dimStyle.Render(scopes))
+			b.WriteString(m.s.Dim.Render(scopes))
 			b.WriteString("\n")
 
 			if i == m.manageKeys.authCursor {
 				// Show details for selected auth
 				if len(auth.Constraints) > 0 {
 					for k, v := range auth.Constraints {
-						b.WriteString(dimStyle.Render(fmt.Sprintf("      %s: %s", k, strings.Join(v, ", "))))
+						b.WriteString(m.s.Dim.Render(fmt.Sprintf("      %s: %s", k, strings.Join(v, ", "))))
 						b.WriteString("\n")
 					}
 				}
 				if len(auth.HardRules) > 0 {
-					b.WriteString(dimStyle.Render(fmt.Sprintf("      rules: %s", strings.Join(auth.HardRules, ", "))))
+					b.WriteString(m.s.Dim.Render(fmt.Sprintf("      rules: %s", strings.Join(auth.HardRules, ", "))))
 					b.WriteString("\n")
 				}
 				if auth.ExpiresAt != nil {
-					b.WriteString(dimStyle.Render(fmt.Sprintf("      expires: %s", auth.ExpiresAt.Format("2006-01-02"))))
+					b.WriteString(m.s.Dim.Render(fmt.Sprintf("      expires: %s", auth.ExpiresAt.Format("2006-01-02"))))
 					b.WriteString("\n")
 				}
 			}
@@ -273,20 +273,20 @@ func (m Model) viewKeyDetail() string {
 	if m.manageKeys.status != "" {
 		b.WriteString("\n")
 		if m.manageKeys.isError {
-			b.WriteString(errorStyle.Render("  " + m.manageKeys.status))
+			b.WriteString(m.s.Error.Render("  " + m.manageKeys.status))
 		} else {
-			b.WriteString(successStyle.Render("  " + m.manageKeys.status))
+			b.WriteString(m.s.Success.Render("  " + m.manageKeys.status))
 		}
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(buildHints([]hint{
+	b.WriteString(m.buildHints([]hint{
 		{"a", "add auth", hintAction},
 		{"r", "revoke auth", hintDanger},
 		{"esc", "back", hintNav},
 	}))
 
-	return borderStyle.Render(b.String())
+	return m.s.Border.Render(b.String())
 }
 
 func truncate(s string, max int) string {

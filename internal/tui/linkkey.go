@@ -62,12 +62,10 @@ func (m Model) updateLinkKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.linkKey.input.Focus()
 		case "enter":
 			if m.linkKey.focus == fieldPublicKey {
-				// Move to label field
 				m.linkKey.focus = fieldLabel
 				m.linkKey.input.Blur()
 				return m, m.linkKey.labelInput.Focus()
 			}
-			// Submit
 			return m.handleLinkKey()
 		}
 	}
@@ -90,7 +88,6 @@ func (m Model) handleLinkKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Validate it's a real SSH public key
 	pubKey, _, _, _, err := gossh.ParseAuthorizedKey([]byte(pubKeyStr))
 	if err != nil {
 		m.linkKey.err = "Invalid SSH public key format"
@@ -113,35 +110,36 @@ func (m Model) handleLinkKey() (tea.Model, tea.Cmd) {
 
 func (m Model) viewLinkKey() string {
 	var b strings.Builder
+	s := m.s
 
-	b.WriteString(titleStyle.Render("Link SSH Key"))
+	b.WriteString(s.Title.Render("Link SSH Key"))
 	b.WriteString("\n\n")
 
 	if m.user != nil {
-		b.WriteString(infoStyle.Render(fmt.Sprintf("  Current identity: %s", m.user.UserID)))
+		b.WriteString(s.Info.Render(fmt.Sprintf("  Current identity: %s", m.user.UserID)))
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(infoStyle.Render("  Paste the public key to link:"))
+	b.WriteString(s.Info.Render("  Paste the public key to link:"))
 	b.WriteString("\n")
 	b.WriteString("  " + m.linkKey.input.View())
 	b.WriteString("\n\n")
 
-	b.WriteString(infoStyle.Render("  Label:"))
+	b.WriteString(s.Info.Render("  Label:"))
 	b.WriteString("\n")
 	b.WriteString("  " + m.linkKey.labelInput.View())
 
 	if m.linkKey.err != "" {
 		b.WriteString("\n\n")
-		b.WriteString(errorStyle.Render("  " + m.linkKey.err))
+		b.WriteString(s.Error.Render("  " + m.linkKey.err))
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(buildHints([]hint{
+	b.WriteString(m.buildHints([]hint{
 		{"tab", "switch field", hintNav},
 		{"enter", "submit", hintAction},
 		{"esc", "cancel", hintNav},
 	}))
 
-	return borderStyle.Render(b.String())
+	return s.Border.Render(b.String())
 }

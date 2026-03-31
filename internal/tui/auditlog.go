@@ -91,11 +91,11 @@ func (m Model) updateAuditLog(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) viewAuditLog() string {
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render("Audit Log"))
+	b.WriteString(m.s.Title.Render("Audit Log"))
 	b.WriteString("\n\n")
 
 	if len(m.auditLog.entries) == 0 {
-		b.WriteString(dimStyle.Render("  No activity yet."))
+		b.WriteString(m.s.Dim.Render("  No activity yet."))
 	} else {
 		// Show up to 15 entries
 		maxVisible := 15
@@ -111,15 +111,15 @@ func (m Model) viewAuditLog() string {
 		for i := start; i < end; i++ {
 			entry := m.auditLog.entries[i]
 			cursor := "  "
-			style := normalStyle
+			style := m.s.Normal
 			if i == m.auditLog.cursor {
 				cursor = "> "
-				style = selectedStyle
+				style = m.s.Selected
 			}
 
-			actionStyle := dimStyle
+			actionStyle := m.s.Dim
 			if strings.Contains(entry.Action, "revoked") {
-				actionStyle = errorStyle
+				actionStyle = m.s.Error
 			}
 
 			line := fmt.Sprintf("%s %s %s", entry.Timestamp, actionStyle.Render(entry.Action), entry.KeyID)
@@ -127,22 +127,22 @@ func (m Model) viewAuditLog() string {
 			b.WriteString("\n")
 
 			if i == m.auditLog.cursor && entry.Detail != "" {
-				b.WriteString(dimStyle.Render("    " + entry.Detail))
+				b.WriteString(m.s.Dim.Render("    " + entry.Detail))
 				b.WriteString("\n")
 			}
 		}
 
 		if len(m.auditLog.entries) > maxVisible {
 			b.WriteString("\n")
-			b.WriteString(dimStyle.Render(fmt.Sprintf("  Showing %d-%d of %d entries", start+1, end, len(m.auditLog.entries))))
+			b.WriteString(m.s.Dim.Render(fmt.Sprintf("  Showing %d-%d of %d entries", start+1, end, len(m.auditLog.entries))))
 		}
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(buildHints([]hint{
+	b.WriteString(m.buildHints([]hint{
 		{"j/k", "scroll", hintNav},
 		{"esc", "back", hintNav},
 	}))
 
-	return borderStyle.Render(b.String())
+	return m.s.Border.Render(b.String())
 }

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/agenticpoa/sshsign/internal/storage"
 )
@@ -27,6 +28,7 @@ type Model struct {
 	screen    screen
 	width     int
 	height    int
+	s         Styles
 
 	// Sub-models
 	linkKey    linkKeyModel
@@ -37,6 +39,10 @@ type Model struct {
 }
 
 func NewModel(db *sql.DB, kek []byte, user *storage.User, userKey *storage.UserKey, isNewUser bool) Model {
+	return NewModelWithRenderer(db, kek, user, userKey, isNewUser, lipgloss.DefaultRenderer())
+}
+
+func NewModelWithRenderer(db *sql.DB, kek []byte, user *storage.User, userKey *storage.UserKey, isNewUser bool, r *lipgloss.Renderer) Model {
 	return Model{
 		db:        db,
 		kek:       kek,
@@ -44,6 +50,7 @@ func NewModel(db *sql.DB, kek []byte, user *storage.User, userKey *storage.UserK
 		userKey:   userKey,
 		isNewUser: isNewUser,
 		screen:    screenWelcome,
+		s:         NewStyles(r),
 		welcome:   newWelcomeModel(user, userKey, isNewUser),
 	}
 }
