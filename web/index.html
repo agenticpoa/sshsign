@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>sshsign - SSH Signing Service for AI Agents</title>
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --border: #262626;
+      --text: #e5e5e5;
+      --text-dim: #737373;
+      --teal: #5fafaf;
+      --green: #4ade80;
+      --purple: #5fafaf;
+      --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 3rem 1.5rem;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 680px;
+      width: 100%;
+    }
+
+    .logo {
+      display: block;
+      max-width: 360px;
+      margin: 0 auto;
+      padding: 1.5rem 0;
+      filter: invert(1) hue-rotate(180deg);
+    }
+
+    .tagline {
+      color: var(--text-dim);
+      font-size: 1rem;
+      margin-bottom: 2.5rem;
+      text-align: center;
+    }
+
+    .try-it {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 2.5rem;
+      text-align: center;
+    }
+
+    .try-it p {
+      color: var(--text-dim);
+      font-size: 0.95rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .command {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem 1.25rem;
+      font-size: 1.2rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      transition: border-color 0.2s;
+    }
+
+    .command:hover {
+      border-color: var(--teal);
+    }
+
+    .command .prompt {
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    .command .cmd {
+      color: var(--teal);
+    }
+
+    .command .copy-icon {
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      transition: color 0.2s;
+    }
+
+    .command:hover .copy-icon {
+      color: var(--teal);
+    }
+
+    .command .copy-icon.copied {
+      color: var(--green);
+    }
+
+    section {
+      margin-bottom: 2.5rem;
+    }
+
+    h2 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--teal);
+      margin-bottom: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .how-it-works li {
+      list-style: none;
+      padding: 0.4rem 0;
+      color: var(--text-dim);
+      font-size: 0.95rem;
+    }
+
+    .how-it-works li strong {
+      color: var(--text);
+    }
+
+    .step-num {
+      color: var(--teal);
+      font-weight: 700;
+      margin-right: 0.5rem;
+    }
+
+    .features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+    }
+
+    @media (max-width: 500px) {
+      .features { grid-template-columns: 1fr; }
+    }
+
+    .feature {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+    }
+
+    .feature-title {
+      color: var(--text);
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .feature-desc {
+      color: var(--text-dim);
+      font-size: 0.85rem;
+    }
+
+    .host-key {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+    }
+
+    .host-key-label {
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .host-key-value {
+      color: var(--text);
+      font-size: 0.9rem;
+      word-break: break-all;
+    }
+
+    .footer {
+      margin-top: 3rem;
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      text-align: center;
+    }
+
+    .footer a {
+      color: var(--teal);
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+
+    pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-x: auto;
+      font-size: 0.9rem;
+      color: var(--text-dim);
+      margin-top: 0.5rem;
+    }
+
+    pre .c { color: var(--green); }
+    pre .k { color: var(--teal); }
+    pre .d { color: var(--text-dim); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <img src="logo.png" alt="sshsign" class="logo">
+    <p class="tagline">SSH signing service for AI agents. No accounts. No passwords. Just SSH.</p>
+
+    <div class="try-it">
+      <p>Try it now in your terminal</p>
+      <div class="command" onclick="copyCommand(this)">
+        <span class="prompt">&gt;</span> <span class="cmd">ssh sshsign.dev</span>
+        <span class="copy-icon" title="Copy to clipboard">&#x2398;</span>
+      </div>
+    </div>
+
+    <section>
+      <h2>How it works</h2>
+      <ul class="how-it-works">
+        <li><span class="step-num">1.</span> <strong>SSH in</strong> with your existing key. That's your identity.</li>
+        <li><span class="step-num">2.</span> <strong>Create a signing key.</strong> Ed25519, server-managed, encrypted at rest.</li>
+        <li><span class="step-num">3.</span> <strong>Set authorization.</strong> Scopes, repo constraints, hard rules, expiration.</li>
+        <li><span class="step-num">4.</span> <strong>Sign things.</strong> Git commits, payloads, anything. Every action logged immutably.</li>
+        <li><span class="step-num">5.</span> <strong>Verify anywhere.</strong> Anyone can verify a signature without an account.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Git commit signing</h2>
+      <pre>
+<span class="c">$</span> <span class="k">go install github.com/agenticpoa/sshsign/cmd/sshsign@latest</span>
+
+<span class="c">$</span> <span class="k">git config --global gpg.format ssh</span>
+<span class="c">$</span> <span class="k">git config --global gpg.ssh.program "sshsign"</span>
+<span class="c">$</span> <span class="k">git config --global user.signingkey "ak_7xm3..."</span>
+
+<span class="c">$</span> <span class="k">git commit -S -m "signed by my agent"</span>
+      </pre>
+    </section>
+
+    <section>
+      <h2>Why</h2>
+      <div class="features">
+        <div class="feature">
+          <div class="feature-title">Identity from SSH keys</div>
+          <div class="feature-desc">No accounts, no OAuth, no passwords. Your SSH key is your identity.</div>
+        </div>
+        <div class="feature">
+          <div class="feature-title">Scoped authorization</div>
+          <div class="feature-desc">Control what your agent can sign. Repos, branches, action types, expiration.</div>
+        </div>
+        <div class="feature">
+          <div class="feature-title">Immutable audit trail</div>
+          <div class="feature-desc">Every sign, deny, and revoke is logged to immudb. Tamper-proof receipts.</div>
+        </div>
+        <div class="feature">
+          <div class="feature-title">Instant revocation</div>
+          <div class="feature-desc">Revoke a key and every authorization cascades. One command.</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Programmatic interface</h2>
+      <pre>
+<span class="d"># Sign a payload</span>
+<span class="c">$</span> <span class="k">ssh sshsign.dev sign \
+    --type git-commit \
+    --key-id ak_7xm3... \
+    &lt; commit-data</span>
+
+<span class="d"># Returns JSON</span>
+{"signature":"-----BEGIN SSH SIGNATURE-----\n...",
+ "key_id":"ak_7xm3...","audit_tx_id":42}
+
+<span class="d"># List keys</span>
+<span class="c">$</span> <span class="k">ssh sshsign.dev keys</span>
+
+<span class="d"># Revoke a key</span>
+<span class="c">$</span> <span class="k">ssh sshsign.dev revoke --key-id ak_7xm3...</span>
+      </pre>
+    </section>
+
+    <section>
+      <h2>SSH host key</h2>
+      <p class="host-key-label">Verify this fingerprint on first connect:</p>
+      <div class="host-key">
+        <div class="host-key-value" id="host-key-fingerprint">
+          SHA256:... (will be populated after deployment)
+        </div>
+      </div>
+      <div class="host-key" style="margin-top: 0.5rem;">
+        <div class="host-key-label">Add to known_hosts:</div>
+        <div class="host-key-value">
+          sshsign.dev ssh-ed25519 AAAAC3...
+        </div>
+      </div>
+    </section>
+
+    <div class="footer">
+      <p>
+        <a href="https://github.com/agenticpoa/sshsign">GitHub</a>
+        &middot; Free and open source
+        &middot; Built with <a href="https://github.com/charmbracelet/wish">wish</a>
+        + <a href="https://github.com/charmbracelet/bubbletea">bubbletea</a>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    function copyCommand(el) {
+      navigator.clipboard.writeText('ssh sshsign.dev');
+      const icon = el.querySelector('.copy-icon');
+      icon.textContent = '\u2713';
+      icon.classList.add('copied');
+      setTimeout(() => {
+        icon.textContent = '\u2398';
+        icon.classList.remove('copied');
+      }, 2000);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+version: 2
+
+builds:
+  - id: sshsign
+    main: ./cmd/sshsign
+    binary: sshsign
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+
+  - id: sshsign-server
+    main: ./cmd/sshsign-server
+    binary: sshsign-server
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+
+archives:
+  - id: sshsign
+    builds:
+      - sshsign
+    name_template: "sshsign_{{ .Os }}_{{ .Arch }}"
+
+  - id: sshsign-server
+    builds:
+      - sshsign-server
+    name_template: "sshsign-server_{{ .Os }}_{{ .Arch }}"
+
+brews:
+  - name: sshsign
+    ids:
+      - sshsign
+    repository:
+      owner: agenticpoa
+      name: homebrew-tap
+    homepage: https://sshsign.dev
+    description: SSH signing service CLI for AI agents
+    install: |
+      bin.install "sshsign"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
