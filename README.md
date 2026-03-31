@@ -1,4 +1,4 @@
-![sshsign logo](web/logo.png)
+![sshsign logo](web/social-preview.png)
 
 # sshsign
 
