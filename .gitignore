@@ -1,6 +1,6 @@
-# Binaries
-sshsign
-sshsign-server
+# Binaries (root only, not cmd/ subdirectories)
+/sshsign
+/sshsign-server
 *.exe
 
 # Database
