@@ -31,7 +31,8 @@ type ImmuDBConfig struct {
 func NewImmuDBLogger(cfg ImmuDBConfig) (*ImmuDBLogger, error) {
 	opts := immudb.DefaultOptions().
 		WithAddress(cfg.Address).
-		WithPort(cfg.Port)
+		WithPort(cfg.Port).
+		WithHeartBeatFrequency(1 * time.Minute)
 
 	client := immudb.NewClient().WithOptions(opts)
 
