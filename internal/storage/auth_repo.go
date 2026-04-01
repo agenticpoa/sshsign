@@ -9,10 +9,20 @@ import (
 
 // CreateAuthorization creates a new authorization token for a signing key.
 func CreateAuthorization(db *sql.DB, signingKeyID, grantedBy string, scopes []string, constraints map[string][]string, hardRules, softRules []string, expiresAt *time.Time) (*Authorization, error) {
+	return CreateAuthorizationFull(db, signingKeyID, grantedBy, scopes, constraints, nil, "", hardRules, softRules, expiresAt)
+}
+
+// CreateAuthorizationFull creates an authorization with all fields including metadata constraints and confirmation tier.
+func CreateAuthorizationFull(db *sql.DB, signingKeyID, grantedBy string, scopes []string, constraints map[string][]string, metadataConstraints []MetadataConstraint, confirmationTier string, hardRules, softRules []string, expiresAt *time.Time) (*Authorization, error) {
 	tokenID := NewTokenID()
+
+	if confirmationTier == "" {
+		confirmationTier = "autonomous"
+	}
 
 	scopesJSON, _ := json.Marshal(scopes)
 	constraintsJSON, _ := json.Marshal(constraints)
+	metadataConstraintsJSON, _ := json.Marshal(metadataConstraints)
 	hardRulesJSON, _ := json.Marshal(hardRules)
 	softRulesJSON, _ := json.Marshal(softRules)
 
@@ -23,10 +33,11 @@ func CreateAuthorization(db *sql.DB, signingKeyID, grantedBy string, scopes []st
 	}
 
 	_, err := db.Exec(
-		`INSERT INTO authorizations (token_id, signing_key_id, granted_by, scopes, constraints, hard_rules, soft_rules, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO authorizations (token_id, signing_key_id, granted_by, scopes, constraints, metadata_constraints, confirmation_tier, hard_rules, soft_rules, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tokenID, signingKeyID, grantedBy,
-		string(scopesJSON), string(constraintsJSON), string(hardRulesJSON), string(softRulesJSON),
+		string(scopesJSON), string(constraintsJSON), string(metadataConstraintsJSON), confirmationTier,
+		string(hardRulesJSON), string(softRulesJSON),
 		expiresAtStr,
 	)
 	if err != nil {
@@ -39,7 +50,7 @@ func CreateAuthorization(db *sql.DB, signingKeyID, grantedBy string, scopes []st
 // GetAuthorization retrieves an authorization by its token ID.
 func GetAuthorization(db *sql.DB, tokenID string) (*Authorization, error) {
 	row := db.QueryRow(
-		`SELECT token_id, signing_key_id, granted_by, scopes, constraints, hard_rules, soft_rules, expires_at, revoked_at, created_at
+		`SELECT token_id, signing_key_id, granted_by, scopes, constraints, metadata_constraints, confirmation_tier, hard_rules, soft_rules, expires_at, revoked_at, created_at
 		 FROM authorizations WHERE token_id = ?`,
 		tokenID,
 	)
@@ -49,7 +60,7 @@ func GetAuthorization(db *sql.DB, tokenID string) (*Authorization, error) {
 // FindAuthorizationsForKey returns all active (non-revoked, non-expired) authorizations for a signing key.
 func FindAuthorizationsForKey(db *sql.DB, signingKeyID string) ([]Authorization, error) {
 	rows, err := db.Query(
-		`SELECT token_id, signing_key_id, granted_by, scopes, constraints, hard_rules, soft_rules, expires_at, revoked_at, created_at
+		`SELECT token_id, signing_key_id, granted_by, scopes, constraints, metadata_constraints, confirmation_tier, hard_rules, soft_rules, expires_at, revoked_at, created_at
 		 FROM authorizations
 		 WHERE signing_key_id = ? AND revoked_at IS NULL
 		 ORDER BY created_at`,
@@ -93,13 +104,14 @@ type scannable interface {
 
 func scanAuthorizationFields(s scannable) (*Authorization, error) {
 	var auth Authorization
-	var scopesJSON, constraintsJSON, hardRulesJSON, softRulesJSON string
+	var scopesJSON, constraintsJSON, metadataConstraintsJSON, hardRulesJSON, softRulesJSON string
 	var createdAt string
 	var expiresAt, revokedAt *string
 
 	err := s.Scan(
 		&auth.TokenID, &auth.SigningKeyID, &auth.GrantedBy,
-		&scopesJSON, &constraintsJSON, &hardRulesJSON, &softRulesJSON,
+		&scopesJSON, &constraintsJSON, &metadataConstraintsJSON, &auth.ConfirmationTier,
+		&hardRulesJSON, &softRulesJSON,
 		&expiresAt, &revokedAt, &createdAt,
 	)
 	if err != nil {
@@ -108,6 +120,7 @@ func scanAuthorizationFields(s scannable) (*Authorization, error) {
 
 	json.Unmarshal([]byte(scopesJSON), &auth.Scopes)
 	json.Unmarshal([]byte(constraintsJSON), &auth.Constraints)
+	json.Unmarshal([]byte(metadataConstraintsJSON), &auth.MetadataConstraints)
 	json.Unmarshal([]byte(hardRulesJSON), &auth.HardRules)
 	json.Unmarshal([]byte(softRulesJSON), &auth.SoftRules)
 

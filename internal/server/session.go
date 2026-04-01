@@ -64,6 +64,16 @@ func CommandHandler(sess ssh.Session, sc *SessionContext) {
 		handleKeys(sess, sc)
 	case "revoke":
 		handleRevoke(sess, sc, cmd[1:])
+	case "pending":
+		handlePending(sess, sc)
+	case "approve":
+		handleApprove(sess, sc, cmd[1:])
+	case "deny":
+		handleDeny(sess, sc, cmd[1:])
+	case "log-offer":
+		handleLogOffer(sess, sc, cmd[1:])
+	case "history":
+		handleHistory(sess, sc, cmd[1:])
 	default:
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("unknown command '%s'", cmd[0])})
 	}

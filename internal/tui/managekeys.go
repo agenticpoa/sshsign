@@ -121,6 +121,15 @@ func (m Model) updateKeyDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.authSetup = newAuthSetupModelForExistingKey(m.db, m.user, key.KeyID)
 			m.screen = screenAuthSetup
 			return m, nil
+		case "e":
+			// Edit: duplicate selected auth with pre-filled values, auto-revoke old on confirm
+			if len(m.manageKeys.auths) > 0 {
+				key := m.manageKeys.keys[m.manageKeys.cursor]
+				auth := m.manageKeys.auths[m.manageKeys.authCursor]
+				m.authSetup = newAuthSetupFromExisting(m.db, m.user, key.KeyID, &auth)
+				m.screen = screenAuthSetup
+				return m, nil
+			}
 		case "r":
 			if len(m.manageKeys.auths) > 0 {
 				auth := m.manageKeys.auths[m.manageKeys.authCursor]
@@ -150,6 +159,47 @@ func (m Model) viewManageKeys() string {
 	}
 }
 
+// scopeSummary returns a human-readable label for an authorization's scope.
+func scopeSummary(auths []storage.Authorization) string {
+	if len(auths) == 0 {
+		return "no auth"
+	}
+	seen := map[string]bool{}
+	var labels []string
+	for _, a := range auths {
+		for _, s := range a.Scopes {
+			if seen[s] {
+				continue
+			}
+			seen[s] = true
+			// Map scope IDs to friendly names
+			switch s {
+			case "git-commit":
+				labels = append(labels, "Git")
+			case "safe-agreement":
+				labels = append(labels, "SAFE")
+			case "nda":
+				labels = append(labels, "NDA")
+			case "*":
+				labels = append(labels, "all")
+			default:
+				labels = append(labels, s)
+			}
+		}
+	}
+	return strings.Join(labels, ", ")
+}
+
+// tierBadge returns a short label for the confirmation tier.
+func tierBadge(auths []storage.Authorization) string {
+	for _, a := range auths {
+		if a.ConfirmationTier == "cosign" {
+			return "cosign"
+		}
+	}
+	return ""
+}
+
 func (m Model) viewKeyList() string {
 	var b strings.Builder
 
@@ -172,17 +222,29 @@ func (m Model) viewKeyList() string {
 				status = m.s.Error.Render("revoked")
 			}
 
-			// Count authorizations
 			auths, _ := storage.FindAuthorizationsForKey(m.db, key.KeyID)
-			authCount := len(auths)
-			authLabel := fmt.Sprintf("%d auth", authCount)
-			if authCount != 1 {
-				authLabel += "s"
-			}
+			scopeLabel := scopeSummary(auths)
+			tier := tierBadge(auths)
 
-			line := fmt.Sprintf("%s  [%s]  %s", key.KeyID, status, m.s.Dim.Render(authLabel))
+			// Line 1: key ID, status, scope type
+			line := fmt.Sprintf("%s  [%s]  %s", key.KeyID, status, m.s.Info.Render(scopeLabel))
+			if tier != "" {
+				line += "  " + m.s.Dim.Render("["+tier+"]")
+			}
 			b.WriteString(style.Render(cursor) + line)
 			b.WriteString("\n")
+
+			// Line 2 (selected only): creation date and auth count
+			if i == m.manageKeys.cursor {
+				authCount := len(auths)
+				authLabel := fmt.Sprintf("%d auth", authCount)
+				if authCount != 1 {
+					authLabel += "s"
+				}
+				detail := fmt.Sprintf("      created %s  %s", key.CreatedAt.Format("2006-01-02"), authLabel)
+				b.WriteString(m.s.Dim.Render(detail))
+				b.WriteString("\n")
+			}
 		}
 	}
 
@@ -236,7 +298,7 @@ func (m Model) viewKeyDetail() string {
 		b.WriteString(m.s.Info.Render("  Authorizations:"))
 		b.WriteString("\n\n")
 
-		for i, auth := range m.manageKeys.auths {
+		for i, a := range m.manageKeys.auths {
 			cursor := "  "
 			style := m.s.Normal
 			if i == m.manageKeys.authCursor {
@@ -244,26 +306,43 @@ func (m Model) viewKeyDetail() string {
 				style = m.s.Selected
 			}
 
-			scopes := strings.Join(auth.Scopes, ", ")
-			b.WriteString(style.Render(fmt.Sprintf("%s%s", cursor, auth.TokenID)))
+			// Scope with friendly name
+			scopeLabel := scopeSummary([]storage.Authorization{a})
+			b.WriteString(style.Render(fmt.Sprintf("%s%s", cursor, a.TokenID)))
 			b.WriteString("  ")
-			b.WriteString(m.s.Dim.Render(scopes))
+			b.WriteString(m.s.Info.Render(scopeLabel))
+			if a.ConfirmationTier == "cosign" {
+				b.WriteString("  ")
+				b.WriteString(m.s.Dim.Render("[cosign]"))
+			}
 			b.WriteString("\n")
 
 			if i == m.manageKeys.authCursor {
-				// Show details for selected auth
-				if len(auth.Constraints) > 0 {
-					for k, v := range auth.Constraints {
+				// Repo constraints
+				if len(a.Constraints) > 0 {
+					for k, v := range a.Constraints {
 						b.WriteString(m.s.Dim.Render(fmt.Sprintf("      %s: %s", k, strings.Join(v, ", "))))
 						b.WriteString("\n")
 					}
 				}
-				if len(auth.HardRules) > 0 {
-					b.WriteString(m.s.Dim.Render(fmt.Sprintf("      rules: %s", strings.Join(auth.HardRules, ", "))))
+
+				// Metadata constraints
+				if len(a.MetadataConstraints) > 0 {
+					for _, mc := range a.MetadataConstraints {
+						b.WriteString(m.s.Dim.Render(fmt.Sprintf("      %s: %s", mc.Field, formatMetadataConstraint(mc))))
+						b.WriteString("\n")
+					}
+				}
+
+				// Rules
+				if len(a.HardRules) > 0 {
+					b.WriteString(m.s.Dim.Render(fmt.Sprintf("      rules: %s", strings.Join(a.HardRules, ", "))))
 					b.WriteString("\n")
 				}
-				if auth.ExpiresAt != nil {
-					b.WriteString(m.s.Dim.Render(fmt.Sprintf("      expires: %s", auth.ExpiresAt.Format("2006-01-02"))))
+
+				// Expiry
+				if a.ExpiresAt != nil {
+					b.WriteString(m.s.Dim.Render(fmt.Sprintf("      expires: %s", a.ExpiresAt.Format("2006-01-02"))))
 					b.WriteString("\n")
 				}
 			}
@@ -280,13 +359,49 @@ func (m Model) viewKeyDetail() string {
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(m.buildHints([]hint{
+	hints := []hint{
 		{"a", "add auth", hintAction},
-		{"r", "revoke auth", hintDanger},
-		{"esc", "back", hintNav},
-	}))
+	}
+	if len(m.manageKeys.auths) > 0 {
+		hints = append(hints, hint{"e", "edit auth", hintAction})
+		hints = append(hints, hint{"r", "revoke auth", hintDanger})
+	}
+	hints = append(hints, hint{"esc", "back", hintNav})
+	b.WriteString(m.buildHints(hints))
 
 	return m.s.Border.Render(b.String())
+}
+
+func formatMetadataConstraint(mc storage.MetadataConstraint) string {
+	switch mc.Type {
+	case "range":
+		minS, maxS := "?", "?"
+		if mc.Min != nil {
+			minS = formatNumber(*mc.Min)
+		}
+		if mc.Max != nil {
+			maxS = formatNumber(*mc.Max)
+		}
+		return fmt.Sprintf("range %s - %s", minS, maxS)
+	case "minimum":
+		if mc.Min != nil {
+			return fmt.Sprintf("min %s", formatNumber(*mc.Min))
+		}
+		return "min ?"
+	case "maximum":
+		if mc.Max != nil {
+			return fmt.Sprintf("max %s", formatNumber(*mc.Max))
+		}
+		return "max ?"
+	case "enum":
+		return fmt.Sprintf("allow [%s]", strings.Join(mc.Allowed, ", "))
+	case "required_bool":
+		if mc.Required != nil && *mc.Required {
+			return "required true"
+		}
+		return "required false"
+	}
+	return mc.Type
 }
 
 func truncate(s string, max int) string {

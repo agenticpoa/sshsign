@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -11,18 +12,20 @@ import (
 
 // Decision represents the result of an authorization check.
 type Decision struct {
-	Allowed       bool
-	TokenID       string
-	DenialReason  string
-	SoftWarnings  []string // soft rule violations (logged but allowed)
-	ScopesChecked []string
-	RulesChecked  []string
+	Allowed          bool
+	TokenID          string
+	ConfirmationTier string // "autonomous" or "cosign"
+	DenialReason     string
+	SoftWarnings     []string // soft rule violations (logged but allowed)
+	ScopesChecked    []string
+	RulesChecked     []string
 }
 
 // SignRequest holds the parameters for a signing authorization check.
 type SignRequest struct {
-	ActionType string            // e.g. "git-commit"
-	Metadata   map[string]string // e.g. {"repo": "github.com/user/repo", "branch": "main"}
+	ActionType      string            // e.g. "git-commit", "safe-agreement"
+	Metadata        map[string]string // e.g. {"repo": "github.com/user/repo", "branch": "main"}
+	RequestMetadata json.RawMessage   // typed metadata JSON for constraint validation
 }
 
 // Authorize checks whether a signing key is authorized to perform the requested action.
@@ -52,7 +55,8 @@ func Authorize(auths []storage.Authorization, req SignRequest, now time.Time) De
 
 func evaluateAuth(auth storage.Authorization, req SignRequest, now time.Time) Decision {
 	d := Decision{
-		TokenID: auth.TokenID,
+		TokenID:          auth.TokenID,
+		ConfirmationTier: auth.ConfirmationTier,
 	}
 
 	// Check expiration
@@ -74,8 +78,14 @@ func evaluateAuth(auth storage.Authorization, req SignRequest, now time.Time) De
 		return d
 	}
 
-	// Check constraints
+	// Check constraints (glob-pattern based)
 	if reason := checkConstraints(auth.Constraints, req.Metadata); reason != "" {
+		d.DenialReason = reason
+		return d
+	}
+
+	// Check typed metadata constraints (range, minimum, maximum, enum, required_bool)
+	if reason := checkMetadataConstraints(auth.MetadataConstraints, req.RequestMetadata); reason != "" {
 		d.DenialReason = reason
 		return d
 	}

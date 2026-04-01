@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"regexp"
 	"time"
 
 	"github.com/charmbracelet/ssh"
@@ -17,6 +18,50 @@ import (
 	"github.com/agenticpoa/sshsign/internal/signing"
 	"github.com/agenticpoa/sshsign/internal/storage"
 )
+
+// bareKeyRe matches unquoted JSON keys like {foo: or ,bar:
+var bareKeyRe = regexp.MustCompile(`([{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:`)
+
+// parseJSONArg extracts a JSON value from args starting at args[*idx].
+// SSH strips inner double quotes, so {foo:1} arrives instead of {"foo":1}.
+// This function tries fixing bare keys first. If the JSON contains spaces,
+// it rejoins subsequent args, but only if they don't look like flags.
+func parseJSONArg(args []string, idx *int) string {
+	raw := args[*idx]
+
+	// Try as-is first
+	if json.Valid([]byte(raw)) {
+		return raw
+	}
+
+	// Try fixing bare keys (SSH stripped double quotes)
+	fixed := fixBareJSONKeys(raw)
+	if json.Valid([]byte(fixed)) {
+		return fixed
+	}
+
+	// Rejoin subsequent args that aren't flags, in case JSON had spaces
+	for *idx+1 < len(args) && !isFlag(args[*idx+1]) {
+		*idx++
+		raw += " " + args[*idx]
+	}
+
+	if json.Valid([]byte(raw)) {
+		return raw
+	}
+
+	return fixBareJSONKeys(raw)
+}
+
+func isFlag(s string) bool {
+	return len(s) >= 2 && s[0] == '-' && s[1] == '-'
+}
+
+// fixBareJSONKeys adds double quotes around unquoted JSON object keys.
+// SSH command parsing strips inner double quotes, so {"key":1} arrives as {key:1}.
+func fixBareJSONKeys(s string) string {
+	return bareKeyRe.ReplaceAllString(s, `$1"$2":`)
+}
 
 // JSON response types for the programmatic interface.
 
@@ -41,6 +86,11 @@ type keyResponse struct {
 	RevokedAt *string `json:"revoked_at,omitempty"`
 }
 
+type pendingSignResponse struct {
+	Status    string `json:"status"`
+	PendingID string `json:"pending_id"`
+}
+
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -53,7 +103,7 @@ func writeJSON(sess ssh.Session, v any) {
 // handleSign processes: ssh sign.agenticpoa.com sign --type git-commit [--key-id ak_xxx]
 // Reads payload from stdin, signs it, returns JSON with signature.
 func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
-	var actionType, keyID, repo, branch string
+	var actionType, keyID, repo, branch, metadataJSON string
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -76,6 +126,11 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 			if i+1 < len(args) {
 				branch = args[i+1]
 				i++
+			}
+		case "--metadata":
+			if i+1 < len(args) {
+				i++
+				metadataJSON = parseJSONArg(args, &i)
 			}
 		}
 	}
@@ -153,9 +208,15 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 		metadata["branch"] = branch
 	}
 
+	var requestMetadata json.RawMessage
+	if metadataJSON != "" {
+		requestMetadata = json.RawMessage(metadataJSON)
+	}
+
 	decision := auth.Authorize(auths, auth.SignRequest{
-		ActionType: actionType,
-		Metadata:   metadata,
+		ActionType:      actionType,
+		Metadata:        metadata,
+		RequestMetadata: requestMetadata,
 	}, time.Now())
 
 	payloadHash := sha256Hash(payload)
@@ -182,6 +243,26 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 
 	for _, w := range decision.SoftWarnings {
 		log.Printf("SOFT WARNING sign %s for %s key %s: %s", actionType, sc.User.UserID, sk.KeyID, w)
+	}
+
+	// Co-sign flow: if confirmation tier is "cosign", hold the request
+	if decision.ConfirmationTier == "cosign" {
+		ps, err := storage.CreatePendingSignature(
+			sc.DB, sk.KeyID, decision.TokenID, sc.User.UserID,
+			actionType, payloadHash, metadataJSON,
+		)
+		if err != nil {
+			writeJSON(sess, errorResponse{Error: fmt.Sprintf("creating pending signature: %v", err)})
+			return
+		}
+
+		log.Printf("PENDING_COSIGN %s for %s key %s pending_id=%s", actionType, sc.User.UserID, sk.KeyID, ps.ID)
+
+		writeJSON(sess, pendingSignResponse{
+			Status:    "pending_cosign",
+			PendingID: ps.ID,
+		})
+		return
 	}
 
 	// Audit logging is synchronous: if unavailable, signing fails
@@ -354,6 +435,341 @@ func handleRevoke(sess ssh.Session, sc *SessionContext, args []string) {
 
 	log.Printf("REVOKED key %s by user %s", keyID, sc.User.UserID)
 	writeJSON(sess, map[string]string{"status": "revoked", "key_id": keyID})
+}
+
+// handlePending lists pending signatures for the current user (as principal).
+func handlePending(sess ssh.Session, sc *SessionContext) {
+	pending, err := storage.ListPendingSignatures(sc.DB, sc.User.UserID)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("listing pending signatures: %v", err)})
+		return
+	}
+
+	type pendingResponse struct {
+		ID           string `json:"id"`
+		SigningKeyID string `json:"signing_key_id"`
+		DocType      string `json:"doc_type"`
+		PayloadHash  string `json:"payload_hash"`
+		Metadata     string `json:"metadata,omitempty"`
+		CreatedAt    string `json:"created_at"`
+	}
+
+	var resp []pendingResponse
+	for _, ps := range pending {
+		resp = append(resp, pendingResponse{
+			ID:           ps.ID,
+			SigningKeyID: ps.SigningKeyID,
+			DocType:      ps.DocType,
+			PayloadHash:  ps.PayloadHash,
+			Metadata:     ps.Metadata,
+			CreatedAt:    ps.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
+	writeJSON(sess, resp)
+}
+
+// handleApprove approves a pending signature, re-validates authorization, and signs.
+func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
+	var pendingID string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--id" && i+1 < len(args) {
+			pendingID = args[i+1]
+			i++
+		}
+	}
+
+	if pendingID == "" {
+		writeJSON(sess, errorResponse{Error: "missing --id"})
+		return
+	}
+
+	ps, err := storage.GetPendingSignature(sc.DB, pendingID)
+	if err != nil || ps == nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("pending signature %s not found", pendingID)})
+		return
+	}
+
+	if ps.Status != "pending" {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("pending signature %s already resolved: %s", pendingID, ps.Status)})
+		return
+	}
+
+	// Only the principal (authorization granter) can approve
+	authToken, err := storage.GetAuthorization(sc.DB, ps.AuthTokenID)
+	if err != nil || authToken == nil {
+		writeJSON(sess, errorResponse{Error: "authorization not found"})
+		return
+	}
+	if authToken.GrantedBy != sc.User.UserID {
+		writeJSON(sess, errorResponse{Error: "only the authorization principal can approve"})
+		return
+	}
+
+	// Re-validate authorization: check it hasn't been revoked or expired (race condition defense)
+	if authToken.RevokedAt != nil {
+		writeJSON(sess, errorResponse{Error: "authorization has been revoked since the request was submitted"})
+		return
+	}
+	if authToken.ExpiresAt != nil && time.Now().After(*authToken.ExpiresAt) {
+		writeJSON(sess, errorResponse{Error: "authorization has expired since the request was submitted"})
+		return
+	}
+
+	// Check signing key hasn't been revoked
+	sk, err := storage.GetSigningKey(sc.DB, ps.SigningKeyID)
+	if err != nil || sk == nil {
+		writeJSON(sess, errorResponse{Error: "signing key not found"})
+		return
+	}
+	if sk.RevokedAt != nil {
+		writeJSON(sess, errorResponse{Error: "signing key has been revoked since the request was submitted"})
+		return
+	}
+
+	// Audit logging is synchronous: if unavailable, signing fails
+	if sc.Audit != nil && !sc.Audit.Healthy() {
+		writeJSON(sess, errorResponse{Error: "audit log unavailable: signing denied for safety"})
+		return
+	}
+
+	// Decrypt and sign
+	dek, err := apoacrypto.UnwrapDEK(sk.DEKEncrypted, sc.KEK)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: "internal error: key decryption failed"})
+		log.Printf("error unwrapping DEK for key %s: %v", sk.KeyID, err)
+		return
+	}
+	defer apoacrypto.ZeroBytes(dek)
+
+	privKey, err := apoacrypto.DecryptPrivateKey(sk.PrivateKeyEncrypted, dek)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: "internal error: key decryption failed"})
+		log.Printf("error decrypting private key %s: %v", sk.KeyID, err)
+		return
+	}
+	defer apoacrypto.ZeroBytes(privKey)
+
+	// Sign using the payload hash as the payload (the original payload isn't stored)
+	sig, err := signing.Sign(privKey, []byte(ps.PayloadHash), ps.DocType)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("signing failed: %v", err)})
+		return
+	}
+
+	// Mark as approved
+	if err := storage.ResolvePendingSignature(sc.DB, pendingID, "approved", sc.User.UserID); err != nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("resolving pending signature: %v", err)})
+		return
+	}
+
+	// Audit log the approval
+	auditTxID := logAudit(sc.Audit, audit.Entry{
+		UserID:             sc.User.UserID,
+		SigningKeyID:       sk.KeyID,
+		ActionType:         ps.DocType,
+		PayloadHash:        ps.PayloadHash,
+		AuthorizationToken: ps.AuthTokenID,
+		Result:             "SIGNED",
+		Signature:          string(sig),
+	})
+
+	log.Printf("APPROVED pending %s by %s, signed with key %s audit_tx=%d", pendingID, sc.User.UserID, sk.KeyID, auditTxID)
+
+	writeJSON(sess, signResponse{
+		Signature: string(sig),
+		KeyID:     sk.KeyID,
+		TokenID:   ps.AuthTokenID,
+		AuditTxID: auditTxID,
+	})
+}
+
+// handleDeny denies a pending signature and logs the denial.
+func handleDeny(sess ssh.Session, sc *SessionContext, args []string) {
+	var pendingID string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--id" && i+1 < len(args) {
+			pendingID = args[i+1]
+			i++
+		}
+	}
+
+	if pendingID == "" {
+		writeJSON(sess, errorResponse{Error: "missing --id"})
+		return
+	}
+
+	ps, err := storage.GetPendingSignature(sc.DB, pendingID)
+	if err != nil || ps == nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("pending signature %s not found", pendingID)})
+		return
+	}
+
+	if ps.Status != "pending" {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("pending signature %s already resolved: %s", pendingID, ps.Status)})
+		return
+	}
+
+	// Only the principal can deny
+	authToken, err := storage.GetAuthorization(sc.DB, ps.AuthTokenID)
+	if err != nil || authToken == nil {
+		writeJSON(sess, errorResponse{Error: "authorization not found"})
+		return
+	}
+	if authToken.GrantedBy != sc.User.UserID {
+		writeJSON(sess, errorResponse{Error: "only the authorization principal can deny"})
+		return
+	}
+
+	if err := storage.ResolvePendingSignature(sc.DB, pendingID, "denied", sc.User.UserID); err != nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("resolving pending signature: %v", err)})
+		return
+	}
+
+	logAudit(sc.Audit, audit.Entry{
+		UserID:             sc.User.UserID,
+		SigningKeyID:       ps.SigningKeyID,
+		ActionType:         ps.DocType,
+		PayloadHash:        ps.PayloadHash,
+		AuthorizationToken: ps.AuthTokenID,
+		Result:             "DENIED",
+		DenialReason:       "co-sign denied by principal",
+	})
+
+	log.Printf("DENIED pending %s by %s", pendingID, sc.User.UserID)
+	writeJSON(sess, map[string]string{"status": "denied", "pending_id": pendingID})
+}
+
+// handleLogOffer logs a structured negotiation offer to the audit trail.
+func handleLogOffer(sess ssh.Session, sc *SessionContext, args []string) {
+	var negotiationID, fromParty, offerType, metadata string
+	var round int
+	var previousTx uint64
+
+	for i := 0; i < len(args); i++ {
+		if i+1 >= len(args) {
+			break
+		}
+		switch args[i] {
+		case "--negotiation-id":
+			negotiationID = args[i+1]
+			i++
+		case "--round":
+			fmt.Sscanf(args[i+1], "%d", &round)
+			i++
+		case "--from":
+			fromParty = args[i+1]
+			i++
+		case "--type":
+			offerType = args[i+1]
+			i++
+		case "--metadata":
+			i++
+			metadata = parseJSONArg(args, &i)
+		case "--previous-tx":
+			fmt.Sscanf(args[i+1], "%d", &previousTx)
+			i++
+		}
+	}
+
+	if negotiationID == "" {
+		writeJSON(sess, errorResponse{Error: "missing --negotiation-id"})
+		return
+	}
+	if fromParty == "" {
+		writeJSON(sess, errorResponse{Error: "missing --from"})
+		return
+	}
+	if offerType == "" {
+		writeJSON(sess, errorResponse{Error: "missing --type"})
+		return
+	}
+
+	// If previous_tx > 0, verify it exists
+	if previousTx > 0 {
+		prev, err := storage.FindOfferByAuditTx(sc.DB, previousTx)
+		if err != nil {
+			writeJSON(sess, errorResponse{Error: fmt.Sprintf("checking previous tx: %v", err)})
+			return
+		}
+		if prev == nil {
+			writeJSON(sess, errorResponse{Error: fmt.Sprintf("previous_tx %d not found", previousTx)})
+			return
+		}
+	}
+
+	// Log to audit trail
+	auditTxID := logAudit(sc.Audit, audit.Entry{
+		UserID:     sc.User.UserID,
+		ActionType: "negotiation-offer",
+		Result:     "LOGGED",
+	})
+
+	// Store the offer
+	offer, err := storage.CreateNegotiationOffer(
+		sc.DB, negotiationID, round, fromParty, offerType,
+		metadata, previousTx, auditTxID, sc.User.UserID,
+	)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("creating offer: %v", err)})
+		return
+	}
+
+	log.Printf("OFFER %s round=%d from=%s type=%s audit_tx=%d", negotiationID, round, fromParty, offerType, auditTxID)
+
+	writeJSON(sess, map[string]any{
+		"immudb_tx":      auditTxID,
+		"negotiation_id": offer.NegotiationID,
+		"round":          offer.Round,
+		"offer_id":       offer.ID,
+	})
+}
+
+// handleHistory returns all offers in a negotiation chain.
+func handleHistory(sess ssh.Session, sc *SessionContext, args []string) {
+	var negotiationID string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--negotiation-id" && i+1 < len(args) {
+			negotiationID = args[i+1]
+			i++
+		}
+	}
+
+	if negotiationID == "" {
+		writeJSON(sess, errorResponse{Error: "missing --negotiation-id"})
+		return
+	}
+
+	offers, err := storage.ListNegotiationOffers(sc.DB, negotiationID)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("listing offers: %v", err)})
+		return
+	}
+
+	type offerResponse struct {
+		Round      int    `json:"round"`
+		From       string `json:"from"`
+		Type       string `json:"type"`
+		Metadata   string `json:"metadata,omitempty"`
+		PreviousTx uint64 `json:"previous_tx"`
+		AuditTxID  uint64 `json:"audit_tx_id"`
+		CreatedAt  string `json:"created_at"`
+	}
+
+	var resp []offerResponse
+	for _, o := range offers {
+		resp = append(resp, offerResponse{
+			Round:      o.Round,
+			From:       o.FromParty,
+			Type:       o.OfferType,
+			Metadata:   o.Metadata,
+			PreviousTx: o.PreviousTx,
+			AuditTxID:  o.AuditTxID,
+			CreatedAt:  o.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
+	writeJSON(sess, resp)
 }
 
 // logAudit writes an audit entry. Returns the tx ID, or 0 if logging fails/is nil.
