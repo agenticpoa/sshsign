@@ -49,6 +49,11 @@ type authSetupModel struct {
 	fromWizard       bool
 	replacingTokenID string // if editing, the old auth to revoke on confirm
 
+	// Pending key material - held in memory until confirm
+	pendingPubSSH     string
+	pendingEncPriv    []byte
+	pendingWrappedDEK []byte
+
 	// Template state
 	selectedTemplate *authTemplate
 	templateCursor   int
@@ -190,6 +195,17 @@ func newAuthSetupModelForKey(db *sql.DB, user *storage.User, keyID string, r *li
 	m.selectedKeyID = keyID
 	m.step = stepSelectTemplate
 	m.fromWizard = true
+	return m
+}
+
+func newAuthSetupModelForPendingKey(db *sql.DB, user *storage.User, keyID, pubSSH string, encPriv, wrappedDEK []byte, r *lipgloss.Renderer) authSetupModel {
+	m := newAuthSetupModel(db, user, r)
+	m.selectedKeyID = keyID
+	m.step = stepSelectTemplate
+	m.fromWizard = true
+	m.pendingPubSSH = pubSSH
+	m.pendingEncPriv = encPriv
+	m.pendingWrappedDEK = wrappedDEK
 	return m
 }
 
@@ -1073,6 +1089,22 @@ func (m Model) handleCreateAuth() (tea.Model, tea.Cmd) {
 				softRules = append(softRules, r.def.ID)
 			}
 		}
+	}
+
+	// Persist pending key if this is a new key from the wizard
+	if m.authSetup.pendingPubSSH != "" {
+		_, err := storage.CreateSigningKeyWithID(
+			m.authSetup.db, m.authSetup.selectedKeyID, m.authSetup.user.UserID,
+			m.authSetup.pendingPubSSH, m.authSetup.pendingEncPriv, m.authSetup.pendingWrappedDEK,
+		)
+		if err != nil {
+			m.authSetup.status = fmt.Sprintf("Error storing key: %v", err)
+			m.authSetup.isError = true
+			return m, nil
+		}
+		m.authSetup.pendingPubSSH = ""
+		m.authSetup.pendingEncPriv = nil
+		m.authSetup.pendingWrappedDEK = nil
 	}
 
 	expires := time.Now().AddDate(0, 0, m.authSetup.expiryDays)

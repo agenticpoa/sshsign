@@ -22,6 +22,20 @@ func CreateSigningKey(db *sql.DB, ownerID, publicKey string, encPrivKey, encDEK 
 	return GetSigningKey(db, keyID)
 }
 
+// CreateSigningKeyWithID stores a new signing key using a pre-generated key ID.
+func CreateSigningKeyWithID(db *sql.DB, keyID, ownerID, publicKey string, encPrivKey, encDEK []byte) (*SigningKey, error) {
+	_, err := db.Exec(
+		`INSERT INTO signing_keys (key_id, owner_id, public_key, private_key_encrypted, dek_encrypted)
+		 VALUES (?, ?, ?, ?, ?)`,
+		keyID, ownerID, publicKey, encPrivKey, encDEK,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("inserting signing key: %w", err)
+	}
+
+	return GetSigningKey(db, keyID)
+}
+
 // GetSigningKey retrieves a signing key by its ID.
 func GetSigningKey(db *sql.DB, keyID string) (*SigningKey, error) {
 	row := db.QueryRow(

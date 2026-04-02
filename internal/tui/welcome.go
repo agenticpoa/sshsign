@@ -151,14 +151,8 @@ func (m Model) handleCreateKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	sk, err := storage.CreateSigningKey(m.db, m.user.UserID, pubSSH, encPrivKey, wrappedDEK)
-	if err != nil {
-		m.welcome.status = fmt.Sprintf("Error storing key: %v", err)
-		m.welcome.isError = true
-		return m, nil
-	}
-
-	m.authSetup = newAuthSetupModelForKey(m.db, m.user, sk.KeyID, m.r)
+	keyID := storage.NewKeyID()
+	m.authSetup = newAuthSetupModelForPendingKey(m.db, m.user, keyID, pubSSH, encPrivKey, wrappedDEK, m.r)
 	m.screen = screenAuthSetup
 	return m, nil
 }
