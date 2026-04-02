@@ -28,8 +28,8 @@ func New(cfg config.Config, db *sql.DB, kek []byte, auditLog audit.Logger) (*ssh
 		wish.WithHostKeyPath(cfg.HostKeyPath),
 		wish.WithPublicKeyAuth(PublicKeyHandler()),
 		wish.WithMiddleware(
-			// Bubbletea middleware runs for PTY sessions, force ANSI256 colors
-			bubbletea.MiddlewareWithColorProfile(tuiHandler(db, kek), termenv.TrueColor),
+			// Bubbletea middleware runs for PTY sessions, ensure ANSI256 colors
+			bubbletea.MiddlewareWithColorProfile(tuiHandler(db, kek), termenv.ANSI256),
 			// Session handler runs first: user lookup/create, command routing
 			SessionHandler(db, kek, rl, auditLog),
 		),
