@@ -51,7 +51,7 @@ func CommandHandler(sess ssh.Session, sc *SessionContext) {
 		wish.Printf(sess, "SSH key: %s\n", sc.UserKey.SSHFingerprint)
 		wish.Println(sess, "")
 		wish.Println(sess, "Connect with an interactive terminal for the full UI.")
-		wish.Println(sess, "Or use commands: sign, verify, keys, revoke")
+		wish.Println(sess, "Or use commands: sign, verify, keys, create-key, revoke")
 		return
 	}
 
@@ -62,6 +62,8 @@ func CommandHandler(sess ssh.Session, sc *SessionContext) {
 		handleVerify(sess, sc, cmd[1:])
 	case "keys":
 		handleKeys(sess, sc)
+	case "create-key":
+		handleCreateKey(sess, sc, cmd[1:])
 	case "revoke":
 		handleRevoke(sess, sc, cmd[1:])
 	case "pending":
