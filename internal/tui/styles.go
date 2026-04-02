@@ -45,7 +45,7 @@ func NewStyles(r *lipgloss.Renderer) Styles {
 		Divider:    r.NewStyle().Foreground(lipgloss.Color("237")),
 		HintKey:    r.NewStyle().Foreground(lipgloss.Color("6")),
 		HintDanger: r.NewStyle().Foreground(lipgloss.Color("196")),
-		HintNav:    r.NewStyle().Foreground(lipgloss.Color("6")),
+		HintNav:    r.NewStyle().Foreground(lipgloss.Color("252")),
 		HintSep:    r.NewStyle().Foreground(lipgloss.Color("237")),
 	}
 }

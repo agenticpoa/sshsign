@@ -27,6 +27,7 @@ type manageKeysModel struct {
 	view       manageKeysView
 	auths      []storage.Authorization
 	authCursor int
+	confirmRevoke bool // waiting for y/n confirmation
 }
 
 func newManageKeysModel(db *sql.DB, user *storage.User) manageKeysModel {
@@ -86,7 +87,16 @@ func (m Model) updateKeyList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if key.RevokedAt != nil {
 					m.manageKeys.status = "Key already revoked"
 					m.manageKeys.isError = true
-				} else if err := storage.RevokeSigningKey(m.manageKeys.db, key.KeyID); err != nil {
+				} else {
+					m.manageKeys.confirmRevoke = true
+					m.manageKeys.status = fmt.Sprintf("Revoke key %s? (y/n)", key.KeyID)
+					m.manageKeys.isError = false
+				}
+			}
+		case "y":
+			if m.manageKeys.confirmRevoke {
+				key := m.manageKeys.keys[m.manageKeys.cursor]
+				if err := storage.RevokeSigningKey(m.manageKeys.db, key.KeyID); err != nil {
 					m.manageKeys.status = fmt.Sprintf("Error: %v", err)
 					m.manageKeys.isError = true
 				} else {
@@ -94,6 +104,12 @@ func (m Model) updateKeyList(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.manageKeys.isError = false
 					m.manageKeys.refreshKeys()
 				}
+				m.manageKeys.confirmRevoke = false
+			}
+		case "n":
+			if m.manageKeys.confirmRevoke {
+				m.manageKeys.confirmRevoke = false
+				m.manageKeys.status = ""
 			}
 		}
 	}
@@ -133,6 +149,13 @@ func (m Model) updateKeyDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			if len(m.manageKeys.auths) > 0 {
 				auth := m.manageKeys.auths[m.manageKeys.authCursor]
+				m.manageKeys.confirmRevoke = true
+				m.manageKeys.status = fmt.Sprintf("Revoke authorization %s? (y/n)", auth.TokenID)
+				m.manageKeys.isError = false
+			}
+		case "y":
+			if m.manageKeys.confirmRevoke {
+				auth := m.manageKeys.auths[m.manageKeys.authCursor]
 				if err := storage.RevokeAuthorization(m.manageKeys.db, auth.TokenID); err != nil {
 					m.manageKeys.status = fmt.Sprintf("Error: %v", err)
 					m.manageKeys.isError = true
@@ -144,6 +167,12 @@ func (m Model) updateKeyDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.manageKeys.authCursor--
 					}
 				}
+				m.manageKeys.confirmRevoke = false
+			}
+		case "n":
+			if m.manageKeys.confirmRevoke {
+				m.manageKeys.confirmRevoke = false
+				m.manageKeys.status = ""
 			}
 		}
 	}
