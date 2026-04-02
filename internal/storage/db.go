@@ -47,6 +47,8 @@ func Migrate(db *sql.DB) error {
 	columnMigrations := []string{
 		`ALTER TABLE authorizations ADD COLUMN metadata_constraints TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE authorizations ADD COLUMN confirmation_tier TEXT NOT NULL DEFAULT 'autonomous'`,
+		`ALTER TABLE signing_keys ADD COLUMN sign_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE signing_keys ADD COLUMN last_used_at TEXT`,
 	}
 	for _, m := range columnMigrations {
 		_, err := db.Exec(m)

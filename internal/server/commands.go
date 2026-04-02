@@ -317,6 +317,7 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 		Result:             "SIGNED",
 		Signature:          string(sig),
 	})
+	storage.RecordKeyUsage(sc.DB, sk.KeyID)
 
 	log.Printf("SIGNED %s for %s key %s token %s audit_tx=%d", actionType, sc.User.UserID, sk.KeyID, decision.TokenID, auditTxID)
 
@@ -735,6 +736,7 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 		Result:             "SIGNED",
 		Signature:          string(sig),
 	})
+	storage.RecordKeyUsage(sc.DB, sk.KeyID)
 
 	log.Printf("APPROVED pending %s by %s, signed with key %s audit_tx=%d", pendingID, sc.User.UserID, sk.KeyID, auditTxID)
 

@@ -28,6 +28,8 @@ type SigningKey struct {
 	DEKEncrypted        []byte
 	CreatedAt           time.Time
 	RevokedAt           *time.Time
+	SignCount           int
+	LastUsedAt          *time.Time
 }
 
 // MetadataConstraint defines a typed constraint on a metadata field.

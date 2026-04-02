@@ -336,7 +336,7 @@ func (m Model) renderKeyRow(b *strings.Builder, i int) {
 	b.WriteString(style.Render(cursor) + line)
 	b.WriteString("\n")
 
-	// Details (selected only): fingerprint, dates on separate lines
+	// Details (selected only): fingerprint, dates, usage stats
 	if i == m.manageKeys.cursor {
 		fp := keyFingerprint(key.PublicKey)
 		b.WriteString(m.s.Dim.Render(fmt.Sprintf("      %s", fp)))
@@ -345,6 +345,20 @@ func (m Model) renderKeyRow(b *strings.Builder, i int) {
 		b.WriteString("\n")
 		if key.RevokedAt != nil {
 			b.WriteString(m.s.Dim.Render(fmt.Sprintf("      revoked %s", key.RevokedAt.Format("Jan 2, 2006 15:04"))))
+			b.WriteString("\n")
+		}
+		if key.SignCount > 0 {
+			usageStr := fmt.Sprintf("      %d sign", key.SignCount)
+			if key.SignCount != 1 {
+				usageStr += "s"
+			}
+			if key.LastUsedAt != nil {
+				usageStr += fmt.Sprintf(", last used %s", key.LastUsedAt.Format("Jan 2, 2006 15:04"))
+			}
+			b.WriteString(m.s.Dim.Render(usageStr))
+			b.WriteString("\n")
+		} else {
+			b.WriteString(m.s.Dim.Render("      never used"))
 			b.WriteString("\n")
 		}
 	}
@@ -386,6 +400,20 @@ func (m Model) viewKeyDetail() string {
 		b.WriteString(m.s.Error.Render(key.RevokedAt.Format("Jan 2, 2006 15:04")))
 		b.WriteString("\n")
 	}
+	b.WriteString(m.s.InfoLabel.Render("  Usage        "))
+	if key.SignCount > 0 {
+		usageStr := fmt.Sprintf("%d sign", key.SignCount)
+		if key.SignCount != 1 {
+			usageStr += "s"
+		}
+		if key.LastUsedAt != nil {
+			usageStr += fmt.Sprintf(", last %s", key.LastUsedAt.Format("Jan 2, 2006 15:04"))
+		}
+		b.WriteString(m.s.Dim.Render(usageStr))
+	} else {
+		b.WriteString(m.s.Dim.Render("never used"))
+	}
+	b.WriteString("\n")
 	b.WriteString("\n")
 
 	if len(m.manageKeys.auths) == 0 {

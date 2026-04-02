@@ -39,36 +39,25 @@ func CreateSigningKeyWithID(db *sql.DB, keyID, ownerID, publicKey string, encPri
 // GetSigningKey retrieves a signing key by its ID.
 func GetSigningKey(db *sql.DB, keyID string) (*SigningKey, error) {
 	row := db.QueryRow(
-		`SELECT key_id, owner_id, public_key, private_key_encrypted, dek_encrypted, created_at, revoked_at
+		`SELECT key_id, owner_id, public_key, private_key_encrypted, dek_encrypted, created_at, revoked_at, sign_count, last_used_at
 		 FROM signing_keys WHERE key_id = ?`,
 		keyID,
 	)
 
-	var sk SigningKey
-	var createdAt string
-	var revokedAt *string
-
-	err := row.Scan(&sk.KeyID, &sk.OwnerID, &sk.PublicKey, &sk.PrivateKeyEncrypted, &sk.DEKEncrypted, &createdAt, &revokedAt)
+	sk, err := scanSigningKey(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying signing key: %w", err)
 	}
-
-	sk.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
-	if revokedAt != nil {
-		t, _ := time.Parse("2006-01-02 15:04:05", *revokedAt)
-		sk.RevokedAt = &t
-	}
-
-	return &sk, nil
+	return sk, nil
 }
 
 // ListSigningKeys returns all signing keys owned by a user.
 func ListSigningKeys(db *sql.DB, ownerID string) ([]SigningKey, error) {
 	rows, err := db.Query(
-		`SELECT key_id, owner_id, public_key, private_key_encrypted, dek_encrypted, created_at, revoked_at
+		`SELECT key_id, owner_id, public_key, private_key_encrypted, dek_encrypted, created_at, revoked_at, sign_count, last_used_at
 		 FROM signing_keys WHERE owner_id = ? ORDER BY created_at`,
 		ownerID,
 	)
@@ -79,20 +68,48 @@ func ListSigningKeys(db *sql.DB, ownerID string) ([]SigningKey, error) {
 
 	var keys []SigningKey
 	for rows.Next() {
-		var sk SigningKey
-		var createdAt string
-		var revokedAt *string
-		if err := rows.Scan(&sk.KeyID, &sk.OwnerID, &sk.PublicKey, &sk.PrivateKeyEncrypted, &sk.DEKEncrypted, &createdAt, &revokedAt); err != nil {
+		sk, err := scanSigningKey(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning signing key: %w", err)
 		}
-		sk.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
-		if revokedAt != nil {
-			t, _ := time.Parse("2006-01-02 15:04:05", *revokedAt)
-			sk.RevokedAt = &t
-		}
-		keys = append(keys, sk)
+		keys = append(keys, *sk)
 	}
 	return keys, rows.Err()
+}
+
+type signingKeyScannable interface {
+	Scan(dest ...any) error
+}
+
+func scanSigningKey(s signingKeyScannable) (*SigningKey, error) {
+	var sk SigningKey
+	var createdAt string
+	var revokedAt, lastUsedAt *string
+
+	err := s.Scan(&sk.KeyID, &sk.OwnerID, &sk.PublicKey, &sk.PrivateKeyEncrypted, &sk.DEKEncrypted, &createdAt, &revokedAt, &sk.SignCount, &lastUsedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	sk.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	if revokedAt != nil {
+		t, _ := time.Parse("2006-01-02 15:04:05", *revokedAt)
+		sk.RevokedAt = &t
+	}
+	if lastUsedAt != nil {
+		t, _ := time.Parse("2006-01-02 15:04:05", *lastUsedAt)
+		sk.LastUsedAt = &t
+	}
+
+	return &sk, nil
+}
+
+// RecordKeyUsage increments the sign count and updates the last used timestamp.
+func RecordKeyUsage(db *sql.DB, keyID string) {
+	db.Exec(
+		`UPDATE signing_keys SET sign_count = sign_count + 1, last_used_at = datetime('now') WHERE key_id = ?`,
+		keyID,
+	)
 }
 
 // RevokeSigningKey marks a signing key as revoked.
