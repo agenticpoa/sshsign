@@ -11,6 +11,9 @@ type Config struct {
 	HostKeyPath string
 	KEKSecret   string
 	HTTPDomain  string // domain for web approval URLs (e.g. "sshsign.dev")
+	HTTPAddr    string // address for HTTP server (e.g. ":8443")
+	TLSCert     string // path to TLS certificate (optional)
+	TLSKey      string // path to TLS private key (optional)
 }
 
 func Load() (Config, error) {
@@ -20,6 +23,9 @@ func Load() (Config, error) {
 		HostKeyPath: envOrDefault("SSHSIGN_HOST_KEY_PATH", "./host_key"),
 		KEKSecret:   os.Getenv("SSHSIGN_KEK_SECRET"),
 		HTTPDomain:  envOrDefault("SSHSIGN_HTTP_DOMAIN", "sshsign.dev"),
+		HTTPAddr:    envOrDefault("SSHSIGN_HTTP_ADDR", ":8443"),
+		TLSCert:     os.Getenv("SSHSIGN_TLS_CERT"),
+		TLSKey:      os.Getenv("SSHSIGN_TLS_KEY"),
 	}
 
 	if cfg.KEKSecret == "" {

@@ -10,6 +10,7 @@ import (
 	"github.com/agenticpoa/sshsign/internal/crypto"
 	"github.com/agenticpoa/sshsign/internal/server"
 	"github.com/agenticpoa/sshsign/internal/storage"
+	"github.com/agenticpoa/sshsign/internal/web"
 )
 
 func main() {
@@ -66,6 +67,20 @@ func main() {
 	if err != nil {
 		log.Fatalf("creating server: %v", err)
 	}
+
+	// Start HTTP server for web approval flow
+	httpSrv := web.New(cfg.HTTPAddr, db, kek)
+	go func() {
+		var err error
+		if cfg.TLSCert != "" && cfg.TLSKey != "" {
+			err = httpSrv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
+		} else {
+			err = httpSrv.ListenAndServe()
+		}
+		if err != nil && err.Error() != "http: Server closed" {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
 
 	if err := server.Run(srv); err != nil {
 		log.Fatalf("server error: %v", err)
