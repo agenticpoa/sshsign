@@ -87,12 +87,13 @@ type keyResponse struct {
 }
 
 type createKeyResponse struct {
-	KeyID     string `json:"key_id"`
-	PublicKey string `json:"public_key"`
-	TokenID   string `json:"token_id"`
-	Scope     string `json:"scope"`
-	Tier      string `json:"tier"`
-	ExpiresAt string `json:"expires_at"`
+	KeyID       string                       `json:"key_id"`
+	PublicKey   string                       `json:"public_key"`
+	TokenID     string                       `json:"token_id"`
+	Scope       string                       `json:"scope"`
+	Tier        string                       `json:"tier"`
+	Constraints []storage.MetadataConstraint `json:"constraints,omitempty"`
+	ExpiresAt   string                       `json:"expires_at"`
 }
 
 type pendingSignResponse struct {
@@ -545,12 +546,13 @@ func handleCreateKey(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 
 	writeJSON(sess, createKeyResponse{
-		KeyID:     sk.KeyID,
-		PublicKey: sk.PublicKey,
-		TokenID:   authorization.TokenID,
-		Scope:     scope,
-		Tier:      tier,
-		ExpiresAt: expires.Format(time.RFC3339),
+		KeyID:       sk.KeyID,
+		PublicKey:   sk.PublicKey,
+		TokenID:     authorization.TokenID,
+		Scope:       scope,
+		Tier:        tier,
+		Constraints: metaConstraints,
+		ExpiresAt:   expires.Format(time.RFC3339),
 	})
 }
 

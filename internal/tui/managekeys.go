@@ -137,6 +137,7 @@ func (m Model) updateKeyDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok {
 		switch km.String() {
 		case "esc":
+			m.manageKeys.refreshKeys()
 			m.manageKeys.view = viewKeyList
 			m.manageKeys.status = ""
 			return m, nil
