@@ -3,6 +3,7 @@ package tui
 import (
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -33,6 +34,7 @@ type manageKeysModel struct {
 
 func newManageKeysModel(db *sql.DB, user *storage.User) manageKeysModel {
 	keys, _ := storage.ListSigningKeys(db, user.UserID)
+	sortKeysActiveFirst(keys)
 	return manageKeysModel{
 		keys: keys,
 		db:   db,
@@ -43,6 +45,20 @@ func newManageKeysModel(db *sql.DB, user *storage.User) manageKeysModel {
 
 func (mk *manageKeysModel) refreshKeys() {
 	mk.keys, _ = storage.ListSigningKeys(mk.db, mk.user.UserID)
+	sortKeysActiveFirst(mk.keys)
+}
+
+// sortKeysActiveFirst sorts keys so active keys come before revoked ones,
+// preserving creation order within each group.
+func sortKeysActiveFirst(keys []storage.SigningKey) {
+	sort.SliceStable(keys, func(i, j int) bool {
+		iRevoked := keys[i].RevokedAt != nil
+		jRevoked := keys[j].RevokedAt != nil
+		if iRevoked != jRevoked {
+			return !iRevoked // active (not revoked) comes first
+		}
+		return false // preserve original order within group
+	})
 }
 
 func (mk *manageKeysModel) refreshAuths() {
@@ -319,15 +335,17 @@ func (m Model) renderKeyRow(b *strings.Builder, i int) {
 	b.WriteString(style.Render(cursor) + line)
 	b.WriteString("\n")
 
-	// Line 2 (selected only): fingerprint and dates
+	// Details (selected only): fingerprint, dates on separate lines
 	if i == m.manageKeys.cursor {
 		fp := keyFingerprint(key.PublicKey)
-		detail := fmt.Sprintf("      %s  created %s", fp, key.CreatedAt.Format("Jan 2, 2006 15:04"))
-		if key.RevokedAt != nil {
-			detail += fmt.Sprintf("  revoked %s", key.RevokedAt.Format("Jan 2, 2006 15:04"))
-		}
-		b.WriteString(m.s.Dim.Render(detail))
+		b.WriteString(m.s.Dim.Render(fmt.Sprintf("      %s", fp)))
 		b.WriteString("\n")
+		b.WriteString(m.s.Dim.Render(fmt.Sprintf("      created %s", key.CreatedAt.Format("Jan 2, 2006 15:04"))))
+		b.WriteString("\n")
+		if key.RevokedAt != nil {
+			b.WriteString(m.s.Dim.Render(fmt.Sprintf("      revoked %s", key.RevokedAt.Format("Jan 2, 2006 15:04"))))
+			b.WriteString("\n")
+		}
 	}
 }
 
