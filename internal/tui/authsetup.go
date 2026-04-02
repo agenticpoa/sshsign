@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/agenticpoa/sshsign/internal/auth"
 	"github.com/agenticpoa/sshsign/internal/storage"
@@ -298,10 +299,15 @@ func newAuthSetupFromExisting(db *sql.DB, user *storage.User, keyID string, exis
 
 // newStaticCursorInput creates a textinput with a static cursor.
 // The default blinking cursor relies on terminal escape sequences
-// that don't work reliably over SSH (wish).
+// that don't work reliably over SSH (wish). We also set an explicit
+// reverse-color style because the default Reverse(true) escape
+// may not be supported by all SSH terminal transports.
 func newStaticCursorInput() textinput.Model {
 	input := textinput.New()
 	input.Cursor.SetMode(cursor.CursorStatic)
+	input.Cursor.Style = lipgloss.NewStyle().
+		Background(lipgloss.Color("252")).
+		Foreground(lipgloss.Color("0"))
 	return input
 }
 
