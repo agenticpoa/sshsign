@@ -118,7 +118,7 @@ func (m Model) updateKeyDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "a":
 			// Add authorization to existing key
 			key := m.manageKeys.keys[m.manageKeys.cursor]
-			m.authSetup = newAuthSetupModelForExistingKey(m.db, m.user, key.KeyID)
+			m.authSetup = newAuthSetupModelForExistingKey(m.db, m.user, key.KeyID, m.r)
 			m.screen = screenAuthSetup
 			return m, nil
 		case "e":
@@ -126,7 +126,7 @@ func (m Model) updateKeyDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.manageKeys.auths) > 0 {
 				key := m.manageKeys.keys[m.manageKeys.cursor]
 				auth := m.manageKeys.auths[m.manageKeys.authCursor]
-				m.authSetup = newAuthSetupFromExisting(m.db, m.user, key.KeyID, &auth)
+				m.authSetup = newAuthSetupFromExisting(m.db, m.user, key.KeyID, &auth, m.r)
 				m.screen = screenAuthSetup
 				return m, nil
 			}

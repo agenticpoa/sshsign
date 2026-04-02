@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	gossh "golang.org/x/crypto/ssh"
 
 	"github.com/agenticpoa/sshsign/internal/storage"
@@ -26,13 +27,13 @@ type linkKeyModel struct {
 	done       bool
 }
 
-func newLinkKeyModel() linkKeyModel {
-	input := newStaticCursorInput()
+func newLinkKeyModel(r *lipgloss.Renderer) linkKeyModel {
+	input := newStaticCursorInput(r)
 	input.Placeholder = "ssh-ed25519 AAAA..."
 	input.CharLimit = 1024
 	input.Width = 60
 
-	label := newStaticCursorInput()
+	label := newStaticCursorInput(r)
 	label.Placeholder = "work laptop"
 	label.CharLimit = 64
 	label.Width = 40

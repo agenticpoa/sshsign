@@ -91,7 +91,7 @@ func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenManageKeys
 				return m, nil
 			case menuAuthSetup:
-				m.authSetup = newAuthSetupModel(m.db, m.user)
+				m.authSetup = newAuthSetupModel(m.db, m.user, m.r)
 				m.screen = screenAuthSetup
 				return m, nil
 			case menuAuditLog:
@@ -100,7 +100,7 @@ func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case menuLinkKey:
 				m.screen = screenLinkKey
-				m.linkKey = newLinkKeyModel()
+				m.linkKey = newLinkKeyModel(m.r)
 				return m, m.linkKey.input.Focus()
 			case menuExit:
 				return m, tea.Quit
@@ -158,7 +158,7 @@ func (m Model) handleCreateKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.authSetup = newAuthSetupModelForKey(m.db, m.user, sk.KeyID)
+	m.authSetup = newAuthSetupModelForKey(m.db, m.user, sk.KeyID, m.r)
 	m.screen = screenAuthSetup
 	return m, nil
 }

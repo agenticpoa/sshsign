@@ -32,13 +32,14 @@ const (
 )
 
 type authSetupModel struct {
-	db      *sql.DB
-	user    *storage.User
-	keys    []storage.SigningKey
-	cursor  int
-	step    authSetupStep
-	status  string
-	isError bool
+	db       *sql.DB
+	user     *storage.User
+	renderer *lipgloss.Renderer
+	keys     []storage.SigningKey
+	cursor   int
+	step     authSetupStep
+	status   string
+	isError  bool
 
 	selectedKeyID string
 	repoInput     textinput.Model
@@ -110,7 +111,7 @@ type ruleOption struct {
 	checked bool
 }
 
-func newEditableConstraint(ct constraintTemplate) editableConstraint {
+func newEditableConstraint(ct constraintTemplate, r *lipgloss.Renderer) editableConstraint {
 	ec := editableConstraint{
 		tmpl:     ct,
 		min:      ct.DefaultMin,
@@ -118,19 +119,17 @@ func newEditableConstraint(ct constraintTemplate) editableConstraint {
 		allowed:  ct.Allowed,
 		required: ct.Required,
 	}
-	ec.minInput = newStaticCursorInput()
+	ec.minInput = newStaticCursorInput(r)
 	ec.minInput.Width = 20
-	ec.minInput.Validate = validateNumeric
 	if ct.DefaultMin != nil {
 		ec.minInput.SetValue(formatNumber(*ct.DefaultMin))
 	}
-	ec.maxInput = newStaticCursorInput()
+	ec.maxInput = newStaticCursorInput(r)
 	ec.maxInput.Width = 20
-	ec.maxInput.Validate = validateNumeric
 	if ct.DefaultMax != nil {
 		ec.maxInput.SetValue(formatNumber(*ct.DefaultMax))
 	}
-	ec.allowedInput = newStaticCursorInput()
+	ec.allowedInput = newStaticCursorInput(r)
 	ec.allowedInput.Width = 40
 	ec.allowedInput.Placeholder = "comma-separated values"
 	if len(ct.Allowed) > 0 {
@@ -140,7 +139,7 @@ func newEditableConstraint(ct constraintTemplate) editableConstraint {
 	for _, v := range ct.Allowed {
 		ec.enumOptions = append(ec.enumOptions, enumOption{value: v, checked: true})
 	}
-	ec.enumNewInput = newStaticCursorInput()
+	ec.enumNewInput = newStaticCursorInput(r)
 	ec.enumNewInput.Placeholder = "new value"
 	ec.enumNewInput.Width = 30
 	return ec
@@ -163,7 +162,7 @@ func formatNumber(f float64) string {
 	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
-func newAuthSetupModel(db *sql.DB, user *storage.User) authSetupModel {
+func newAuthSetupModel(db *sql.DB, user *storage.User, r *lipgloss.Renderer) authSetupModel {
 	keys, _ := storage.ListSigningKeys(db, user.UserID)
 
 	var active []storage.SigningKey
@@ -176,25 +175,26 @@ func newAuthSetupModel(db *sql.DB, user *storage.User) authSetupModel {
 	return authSetupModel{
 		db:         db,
 		user:       user,
+		renderer:   r,
 		keys:       active,
 		step:       stepSelectKey,
-		repoInput:  newRepoInput(),
+		repoInput:  newRepoInput(r),
 		rules:      newRuleOptions(),
 		expiryDays: 30,
-		scopeInput: newScopeInput(),
+		scopeInput: newScopeInput(r),
 	}
 }
 
-func newAuthSetupModelForKey(db *sql.DB, user *storage.User, keyID string) authSetupModel {
-	m := newAuthSetupModel(db, user)
+func newAuthSetupModelForKey(db *sql.DB, user *storage.User, keyID string, r *lipgloss.Renderer) authSetupModel {
+	m := newAuthSetupModel(db, user, r)
 	m.selectedKeyID = keyID
 	m.step = stepSelectTemplate
 	m.fromWizard = true
 	return m
 }
 
-func newAuthSetupModelForExistingKey(db *sql.DB, user *storage.User, keyID string) authSetupModel {
-	m := newAuthSetupModel(db, user)
+func newAuthSetupModelForExistingKey(db *sql.DB, user *storage.User, keyID string, r *lipgloss.Renderer) authSetupModel {
+	m := newAuthSetupModel(db, user, r)
 	m.selectedKeyID = keyID
 	m.step = stepSelectTemplate
 	m.fromWizard = false
@@ -203,8 +203,8 @@ func newAuthSetupModelForExistingKey(db *sql.DB, user *storage.User, keyID strin
 
 // newAuthSetupFromExisting creates an auth setup pre-filled from an existing authorization.
 // On confirm, the old authorization is auto-revoked (edit = revoke old + create new).
-func newAuthSetupFromExisting(db *sql.DB, user *storage.User, keyID string, existing *storage.Authorization) authSetupModel {
-	m := newAuthSetupModel(db, user)
+func newAuthSetupFromExisting(db *sql.DB, user *storage.User, keyID string, existing *storage.Authorization, r *lipgloss.Renderer) authSetupModel {
+	m := newAuthSetupModel(db, user, r)
 	m.selectedKeyID = keyID
 	m.fromWizard = false
 	m.replacingTokenID = existing.TokenID
@@ -274,7 +274,7 @@ func newAuthSetupFromExisting(db *sql.DB, user *storage.User, keyID string, exis
 					}
 				}
 			}
-			m.constraints = append(m.constraints, newEditableConstraint(ct))
+			m.constraints = append(m.constraints, newEditableConstraint(ct, m.renderer))
 		}
 	}
 
@@ -300,36 +300,44 @@ func newAuthSetupFromExisting(db *sql.DB, user *storage.User, keyID string, exis
 }
 
 // newStaticCursorInput creates a textinput with a visible cursor over SSH.
-// The default blinking cursor and Reverse(true) styling don't work reliably
-// over SSH (wish). We use CursorStatic with a block character so the cursor
-// is always visible regardless of terminal escape support.
-func newStaticCursorInput() textinput.Model {
+// Uses the session renderer so ANSI escapes are emitted correctly
+// (the default renderer is bound to the server's stdout, which has no TTY
+// when running as a daemon, causing all styles to be stripped).
+func newStaticCursorInput(r *lipgloss.Renderer) textinput.Model {
 	input := textinput.New()
 	input.Cursor.SetMode(cursor.CursorStatic)
-	input.Cursor.SetChar("█")
-	input.Cursor.Style = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15"))
+	input.Cursor.Style = r.NewStyle().Reverse(true)
+	input.Cursor.TextStyle = r.NewStyle()
 	return input
 }
 
-// validateNumeric rejects any character that isn't part of a valid number.
-func validateNumeric(s string) error {
-	if s == "" || s == "-" || s == "." || s == "-." {
-		return nil
-	}
-	_, err := strconv.ParseFloat(s, 64)
-	return err
+// isNumericRune returns true if the rune is valid in a numeric value.
+func isNumericRune(r rune) bool {
+	return (r >= '0' && r <= '9') || r == '.' || r == '-'
 }
 
-func newRepoInput() textinput.Model {
-	input := newStaticCursorInput()
+// filterNumericMsg returns nil if the key message contains non-numeric runes,
+// preventing them from reaching the textinput's Update.
+func filterNumericMsg(msg tea.Msg) tea.Msg {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyRunes {
+		for _, r := range keyMsg.Runes {
+			if !isNumericRune(r) {
+				return nil
+			}
+		}
+	}
+	return msg
+}
+
+func newRepoInput(r *lipgloss.Renderer) textinput.Model {
+	input := newStaticCursorInput(r)
 	input.Placeholder = "github.com/user/* (leave empty to skip)"
 	input.Width = 50
 	return input
 }
 
-func newScopeInput() textinput.Model {
-	input := newStaticCursorInput()
+func newScopeInput(r *lipgloss.Renderer) textinput.Model {
+	input := newStaticCursorInput(r)
 	input.Placeholder = "e.g. api-request, purchase-agreement"
 	input.Width = 50
 	return input
@@ -429,7 +437,7 @@ func (m *authSetupModel) selectTemplate(tmpl *authTemplate) {
 
 	m.constraints = nil
 	for _, ct := range tmpl.Constraints {
-		m.constraints = append(m.constraints, newEditableConstraint(ct))
+		m.constraints = append(m.constraints, newEditableConstraint(ct, m.renderer))
 	}
 	m.constraintCursor = 0
 	m.editingConstraint = false
@@ -687,12 +695,16 @@ func (m Model) updateAuthEditConstraintInline(msg tea.Msg) (tea.Model, tea.Cmd) 
 		}
 	}
 
+	filtered := filterNumericMsg(msg)
+	if filtered == nil {
+		return m, nil
+	}
 	var cmd tea.Cmd
 	switch {
 	case ec.minInput.Focused():
-		ec.minInput, cmd = ec.minInput.Update(msg)
+		ec.minInput, cmd = ec.minInput.Update(filtered)
 	case ec.maxInput.Focused():
-		ec.maxInput, cmd = ec.maxInput.Update(msg)
+		ec.maxInput, cmd = ec.maxInput.Update(filtered)
 	}
 	return m, cmd
 }
@@ -813,7 +825,7 @@ func (m Model) updateAddConstraintType(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			m.authSetup.addSubStep = addStepField
-			m.authSetup.newFieldInput = newStaticCursorInput()
+			m.authSetup.newFieldInput = newStaticCursorInput(m.r)
 			m.authSetup.newFieldInput.Placeholder = "field name (e.g. valuation_cap)"
 			m.authSetup.newFieldInput.Width = 40
 			cmd := m.authSetup.newFieldInput.Focus()
@@ -841,20 +853,18 @@ func (m Model) updateAddConstraintField(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Type:     "required_bool",
 				Required: boolptr(true),
 			}
-			m.authSetup.constraints = append(m.authSetup.constraints, newEditableConstraint(ct))
+			m.authSetup.constraints = append(m.authSetup.constraints, newEditableConstraint(ct, m.r))
 			m.authSetup.addSubStep = addStepList
 			return m, nil
 		}
 
 		// Set up value inputs
 		m.authSetup.addSubStep = addStepValues
-		m.authSetup.newMinInput = newStaticCursorInput()
+		m.authSetup.newMinInput = newStaticCursorInput(m.r)
 		m.authSetup.newMinInput.Width = 20
-		m.authSetup.newMinInput.Validate = validateNumeric
-		m.authSetup.newMaxInput = newStaticCursorInput()
+		m.authSetup.newMaxInput = newStaticCursorInput(m.r)
 		m.authSetup.newMaxInput.Width = 20
-		m.authSetup.newMaxInput.Validate = validateNumeric
-		m.authSetup.newAllowedInput = newStaticCursorInput()
+		m.authSetup.newAllowedInput = newStaticCursorInput(m.r)
 		m.authSetup.newAllowedInput.Width = 40
 		m.authSetup.newAllowedInput.Placeholder = "comma-separated values"
 
@@ -915,7 +925,7 @@ func (m Model) updateAddConstraintValues(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			m.authSetup.constraints = append(m.authSetup.constraints, newEditableConstraint(ct))
+			m.authSetup.constraints = append(m.authSetup.constraints, newEditableConstraint(ct, m.r))
 			m.authSetup.addSubStep = addStepList
 			return m, nil
 		case "tab":
@@ -936,15 +946,27 @@ func (m Model) updateAddConstraintValues(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch selectedType {
 	case "range":
+		filtered := filterNumericMsg(msg)
+		if filtered == nil {
+			return m, nil
+		}
 		if m.authSetup.newMinInput.Focused() {
-			m.authSetup.newMinInput, cmd = m.authSetup.newMinInput.Update(msg)
+			m.authSetup.newMinInput, cmd = m.authSetup.newMinInput.Update(filtered)
 		} else {
-			m.authSetup.newMaxInput, cmd = m.authSetup.newMaxInput.Update(msg)
+			m.authSetup.newMaxInput, cmd = m.authSetup.newMaxInput.Update(filtered)
 		}
 	case "minimum":
-		m.authSetup.newMinInput, cmd = m.authSetup.newMinInput.Update(msg)
+		filtered := filterNumericMsg(msg)
+		if filtered == nil {
+			return m, nil
+		}
+		m.authSetup.newMinInput, cmd = m.authSetup.newMinInput.Update(filtered)
 	case "maximum":
-		m.authSetup.newMaxInput, cmd = m.authSetup.newMaxInput.Update(msg)
+		filtered := filterNumericMsg(msg)
+		if filtered == nil {
+			return m, nil
+		}
+		m.authSetup.newMaxInput, cmd = m.authSetup.newMaxInput.Update(filtered)
 	case "enum":
 		m.authSetup.newAllowedInput, cmd = m.authSetup.newAllowedInput.Update(msg)
 	}

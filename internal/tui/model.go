@@ -28,6 +28,7 @@ type Model struct {
 	screen    screen
 	width     int
 	height    int
+	r         *lipgloss.Renderer
 	s         Styles
 
 	// Sub-models
@@ -50,6 +51,7 @@ func NewModelWithRenderer(db *sql.DB, kek []byte, user *storage.User, userKey *s
 		userKey:   userKey,
 		isNewUser: isNewUser,
 		screen:    screenWelcome,
+		r:         r,
 		s:         NewStyles(r),
 		welcome:   newWelcomeModel(user, userKey, isNewUser),
 	}
