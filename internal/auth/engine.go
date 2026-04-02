@@ -15,6 +15,7 @@ type Decision struct {
 	Allowed          bool
 	TokenID          string
 	ConfirmationTier string // "autonomous" or "cosign"
+	RequireSignature bool   // if true, cosign approval needs handwritten signature via web
 	DenialReason     string
 	SoftWarnings     []string // soft rule violations (logged but allowed)
 	ScopesChecked    []string
@@ -57,6 +58,7 @@ func evaluateAuth(auth storage.Authorization, req SignRequest, now time.Time) De
 	d := Decision{
 		TokenID:          auth.TokenID,
 		ConfirmationTier: auth.ConfirmationTier,
+		RequireSignature: auth.RequireSignature,
 	}
 
 	// Check expiration

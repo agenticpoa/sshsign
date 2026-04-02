@@ -31,7 +31,7 @@ func New(cfg config.Config, db *sql.DB, kek []byte, auditLog audit.Logger) (*ssh
 			// Bubbletea middleware runs for PTY sessions, ensure ANSI256 colors
 			bubbletea.MiddlewareWithColorProfile(tuiHandler(db, kek), termenv.ANSI256),
 			// Session handler runs first: user lookup/create, command routing
-			SessionHandler(db, kek, rl, auditLog),
+			SessionHandler(db, kek, rl, auditLog, cfg.HTTPDomain),
 		),
 	)
 	if err != nil {

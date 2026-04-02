@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -97,12 +98,21 @@ type createKeyResponse struct {
 }
 
 type pendingSignResponse struct {
-	Status    string `json:"status"`
-	PendingID string `json:"pending_id"`
+	Status            string `json:"status"`
+	PendingID         string `json:"pending_id"`
+	RequiresSignature bool   `json:"requires_signature,omitempty"`
+	ApprovalURL       string `json:"approval_url,omitempty"`
 }
 
 type errorResponse struct {
 	Error string `json:"error"`
+}
+
+func approvalDomain(sc *SessionContext) string {
+	if sc.HTTPDomain != "" {
+		return sc.HTTPDomain
+	}
+	return "sshsign.dev"
 }
 
 func writeJSON(sess ssh.Session, v any) {
@@ -257,21 +267,36 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 
 	// Co-sign flow: if confirmation tier is "cosign", hold the request
 	if decision.ConfirmationTier == "cosign" {
+		var approvalToken string
+		if decision.RequireSignature {
+			tokenBytes := make([]byte, 32)
+			if _, err := rand.Read(tokenBytes); err != nil {
+				writeJSON(sess, errorResponse{Error: "generating approval token"})
+				return
+			}
+			approvalToken = hex.EncodeToString(tokenBytes)
+		}
+
 		ps, err := storage.CreatePendingSignature(
 			sc.DB, sk.KeyID, decision.TokenID, sc.User.UserID,
-			actionType, payloadHash, metadataJSON, "", "",
+			actionType, payloadHash, metadataJSON, approvalToken, "",
 		)
 		if err != nil {
 			writeJSON(sess, errorResponse{Error: fmt.Sprintf("creating pending signature: %v", err)})
 			return
 		}
 
-		log.Printf("PENDING_COSIGN %s for %s key %s pending_id=%s", actionType, sc.User.UserID, sk.KeyID, ps.ID)
+		log.Printf("PENDING_COSIGN %s for %s key %s pending_id=%s require_sig=%v", actionType, sc.User.UserID, sk.KeyID, ps.ID, decision.RequireSignature)
 
-		writeJSON(sess, pendingSignResponse{
+		resp := pendingSignResponse{
 			Status:    "pending_cosign",
 			PendingID: ps.ID,
-		})
+		}
+		if decision.RequireSignature {
+			resp.RequiresSignature = true
+			resp.ApprovalURL = fmt.Sprintf("https://%s/approve/%s?token=%s", approvalDomain(sc), ps.ID, approvalToken)
+		}
+		writeJSON(sess, resp)
 		return
 	}
 
@@ -409,6 +434,7 @@ func handleKeys(sess ssh.Session, sc *SessionContext) {
 // Generates a new signing key and authorization in one step.
 func handleCreateKey(sess ssh.Session, sc *SessionContext, args []string) {
 	var scope, tier, constraintsJSON string
+	var requireSignature bool
 	expiryDays := 30
 
 	for i := 0; i < len(args); i++ {
@@ -423,6 +449,8 @@ func handleCreateKey(sess ssh.Session, sc *SessionContext, args []string) {
 				i++
 				tier = args[i]
 			}
+		case "--require-signature":
+			requireSignature = true
 		case "--expiry":
 			if i+1 < len(args) {
 				i++
@@ -538,7 +566,7 @@ func handleCreateKey(sess ssh.Session, sc *SessionContext, args []string) {
 	expires := time.Now().AddDate(0, 0, expiryDays)
 	authorization, err := storage.CreateAuthorizationFull(
 		sc.DB, sk.KeyID, sc.User.UserID,
-		[]string{scope}, nil, metaConstraints, tier, false,
+		[]string{scope}, nil, metaConstraints, tier, requireSignature,
 		nil, nil, &expires,
 	)
 	if err != nil {
@@ -688,6 +716,16 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 	if sk.RevokedAt != nil {
 		writeJSON(sess, errorResponse{Error: "signing key has been revoked since the request was submitted"})
 		return
+	}
+
+	// If require_signature is set, check for evidence envelope (web approval)
+	if authToken.RequireSignature {
+		env, _ := storage.GetEvidenceEnvelope(sc.DB, pendingID)
+		if env == nil {
+			url := fmt.Sprintf("https://%s/approve/%s?token=%s", approvalDomain(sc), ps.ID, ps.ApprovalToken)
+			writeJSON(sess, errorResponse{Error: fmt.Sprintf("this approval requires a handwritten signature: %s", url)})
+			return
+		}
 	}
 
 	// Audit logging is synchronous: if unavailable, signing fails
