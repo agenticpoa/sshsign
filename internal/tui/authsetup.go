@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -116,17 +117,17 @@ func newEditableConstraint(ct constraintTemplate) editableConstraint {
 		allowed:  ct.Allowed,
 		required: ct.Required,
 	}
-	ec.minInput = textinput.New()
+	ec.minInput = newStaticCursorInput()
 	ec.minInput.Width = 20
 	if ct.DefaultMin != nil {
 		ec.minInput.SetValue(formatNumber(*ct.DefaultMin))
 	}
-	ec.maxInput = textinput.New()
+	ec.maxInput = newStaticCursorInput()
 	ec.maxInput.Width = 20
 	if ct.DefaultMax != nil {
 		ec.maxInput.SetValue(formatNumber(*ct.DefaultMax))
 	}
-	ec.allowedInput = textinput.New()
+	ec.allowedInput = newStaticCursorInput()
 	ec.allowedInput.Width = 40
 	ec.allowedInput.Placeholder = "comma-separated values"
 	if len(ct.Allowed) > 0 {
@@ -136,7 +137,7 @@ func newEditableConstraint(ct constraintTemplate) editableConstraint {
 	for _, v := range ct.Allowed {
 		ec.enumOptions = append(ec.enumOptions, enumOption{value: v, checked: true})
 	}
-	ec.enumNewInput = textinput.New()
+	ec.enumNewInput = newStaticCursorInput()
 	ec.enumNewInput.Placeholder = "new value"
 	ec.enumNewInput.Width = 30
 	return ec
@@ -295,15 +296,24 @@ func newAuthSetupFromExisting(db *sql.DB, user *storage.User, keyID string, exis
 	return m
 }
 
-func newRepoInput() textinput.Model {
+// newStaticCursorInput creates a textinput with a static cursor.
+// The default blinking cursor relies on terminal escape sequences
+// that don't work reliably over SSH (wish).
+func newStaticCursorInput() textinput.Model {
 	input := textinput.New()
+	input.Cursor.SetMode(cursor.CursorStatic)
+	return input
+}
+
+func newRepoInput() textinput.Model {
+	input := newStaticCursorInput()
 	input.Placeholder = "github.com/user/* (leave empty to skip)"
 	input.Width = 50
 	return input
 }
 
 func newScopeInput() textinput.Model {
-	input := textinput.New()
+	input := newStaticCursorInput()
 	input.Placeholder = "e.g. api-request, purchase-agreement"
 	input.Width = 50
 	return input
@@ -786,7 +796,7 @@ func (m Model) updateAddConstraintType(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			m.authSetup.addSubStep = addStepField
-			m.authSetup.newFieldInput = textinput.New()
+			m.authSetup.newFieldInput = newStaticCursorInput()
 			m.authSetup.newFieldInput.Placeholder = "field name (e.g. valuation_cap)"
 			m.authSetup.newFieldInput.Width = 40
 			m.authSetup.newFieldInput.Focus()
@@ -821,11 +831,11 @@ func (m Model) updateAddConstraintField(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Set up value inputs
 		m.authSetup.addSubStep = addStepValues
-		m.authSetup.newMinInput = textinput.New()
+		m.authSetup.newMinInput = newStaticCursorInput()
 		m.authSetup.newMinInput.Width = 20
-		m.authSetup.newMaxInput = textinput.New()
+		m.authSetup.newMaxInput = newStaticCursorInput()
 		m.authSetup.newMaxInput.Width = 20
-		m.authSetup.newAllowedInput = textinput.New()
+		m.authSetup.newAllowedInput = newStaticCursorInput()
 		m.authSetup.newAllowedInput.Width = 40
 		m.authSetup.newAllowedInput.Placeholder = "comma-separated values"
 

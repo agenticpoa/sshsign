@@ -27,12 +27,12 @@ type linkKeyModel struct {
 }
 
 func newLinkKeyModel() linkKeyModel {
-	input := textinput.New()
+	input := newStaticCursorInput()
 	input.Placeholder = "ssh-ed25519 AAAA..."
 	input.CharLimit = 1024
 	input.Width = 60
 
-	label := textinput.New()
+	label := newStaticCursorInput()
 	label.Placeholder = "work laptop"
 	label.CharLimit = 64
 	label.Width = 40
