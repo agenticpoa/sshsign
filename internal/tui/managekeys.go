@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	gossh "golang.org/x/crypto/ssh"
 
 	"github.com/agenticpoa/sshsign/internal/storage"
 )
@@ -238,41 +239,34 @@ func (m Model) viewKeyList() string {
 	if len(m.manageKeys.keys) == 0 {
 		b.WriteString(m.s.Dim.Render("  No signing keys yet."))
 	} else {
+		// Split into active and revoked
+		var activeIdxs, revokedIdxs []int
 		for i, key := range m.manageKeys.keys {
-			cursor := "  "
-			style := m.s.Normal
-			if i == m.manageKeys.cursor {
-				cursor = "> "
-				style = m.s.Selected
-			}
-
-			status := m.s.Success.Render("active")
 			if key.RevokedAt != nil {
-				status = m.s.Error.Render("revoked")
+				revokedIdxs = append(revokedIdxs, i)
+			} else {
+				activeIdxs = append(activeIdxs, i)
 			}
+		}
 
-			auths, _ := storage.FindAuthorizationsForKey(m.db, key.KeyID)
-			scopeLabel := scopeSummary(auths)
-			tier := tierBadge(auths)
-
-			// Line 1: key ID, status, scope type
-			line := fmt.Sprintf("%s  [%s]  %s", key.KeyID, status, m.s.Info.Render(scopeLabel))
-			if tier != "" {
-				line += "  " + m.s.Dim.Render("["+tier+"]")
+		if len(activeIdxs) > 0 {
+			b.WriteString(m.s.Info.Render("  Active Keys"))
+			b.WriteString("\n\n")
+			for _, i := range activeIdxs {
+				m.renderKeyRow(&b, i)
 			}
-			b.WriteString(style.Render(cursor) + line)
-			b.WriteString("\n")
+		}
 
-			// Line 2 (selected only): creation date and auth count
-			if i == m.manageKeys.cursor {
-				authCount := len(auths)
-				authLabel := fmt.Sprintf("%d auth", authCount)
-				if authCount != 1 {
-					authLabel += "s"
-				}
-				detail := fmt.Sprintf("      created %s  %s", key.CreatedAt.Format("2006-01-02"), authLabel)
-				b.WriteString(m.s.Dim.Render(detail))
+		if len(revokedIdxs) > 0 {
+			if len(activeIdxs) > 0 {
 				b.WriteString("\n")
+				b.WriteString(m.s.Divider.Render("  " + strings.Repeat("─", 40)))
+				b.WriteString("\n\n")
+			}
+			b.WriteString(m.s.Dim.Render("  Revoked Keys"))
+			b.WriteString("\n\n")
+			for _, i := range revokedIdxs {
+				m.renderKeyRow(&b, i)
 			}
 		}
 	}
@@ -296,6 +290,55 @@ func (m Model) viewKeyList() string {
 	return m.s.Border.Render(b.String())
 }
 
+func (m Model) renderKeyRow(b *strings.Builder, i int) {
+	key := m.manageKeys.keys[i]
+	cursor := "  "
+	style := m.s.Normal
+	if i == m.manageKeys.cursor {
+		cursor = "> "
+		style = m.s.Selected
+	}
+
+	auths, _ := storage.FindAuthorizationsForKey(m.db, key.KeyID)
+	scopeLabel := scopeSummary(auths)
+	tier := tierBadge(auths)
+	authCount := len(auths)
+	authLabel := fmt.Sprintf("%d auth", authCount)
+	if authCount != 1 {
+		authLabel += "s"
+	}
+
+	// Line 1: key ID, scope, auth count, tier
+	line := fmt.Sprintf("%s  %s  %s", key.KeyID, m.s.Info.Render(scopeLabel), m.s.Dim.Render(authLabel))
+	if tier != "" {
+		line += "  " + m.s.Dim.Render("["+tier+"]")
+	}
+	if key.RevokedAt != nil {
+		line += "  " + m.s.Error.Render("revoked")
+	}
+	b.WriteString(style.Render(cursor) + line)
+	b.WriteString("\n")
+
+	// Line 2 (selected only): fingerprint and dates
+	if i == m.manageKeys.cursor {
+		fp := keyFingerprint(key.PublicKey)
+		detail := fmt.Sprintf("      %s  created %s", fp, key.CreatedAt.Format("Jan 2, 2006 15:04"))
+		if key.RevokedAt != nil {
+			detail += fmt.Sprintf("  revoked %s", key.RevokedAt.Format("Jan 2, 2006 15:04"))
+		}
+		b.WriteString(m.s.Dim.Render(detail))
+		b.WriteString("\n")
+	}
+}
+
+func keyFingerprint(pubKeyStr string) string {
+	pub, _, _, _, err := gossh.ParseAuthorizedKey([]byte(pubKeyStr))
+	if err != nil {
+		return "unknown"
+	}
+	return gossh.FingerprintSHA256(pub)
+}
+
 func (m Model) viewKeyDetail() string {
 	var b strings.Builder
 
@@ -313,12 +356,18 @@ func (m Model) viewKeyDetail() string {
 	b.WriteString(status)
 	b.WriteString("\n\n")
 
-	b.WriteString(m.s.InfoLabel.Render("  Public   "))
-	b.WriteString(m.s.Dim.Render(truncate(key.PublicKey, 45)))
+	b.WriteString(m.s.InfoLabel.Render("  Fingerprint  "))
+	b.WriteString(m.s.Dim.Render(keyFingerprint(key.PublicKey)))
 	b.WriteString("\n")
-	b.WriteString(m.s.InfoLabel.Render("  Created  "))
-	b.WriteString(m.s.Dim.Render(key.CreatedAt.Format("2006-01-02 15:04")))
-	b.WriteString("\n\n")
+	b.WriteString(m.s.InfoLabel.Render("  Created      "))
+	b.WriteString(m.s.Dim.Render(key.CreatedAt.Format("Jan 2, 2006 15:04")))
+	b.WriteString("\n")
+	if key.RevokedAt != nil {
+		b.WriteString(m.s.InfoLabel.Render("  Revoked      "))
+		b.WriteString(m.s.Error.Render(key.RevokedAt.Format("Jan 2, 2006 15:04")))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 
 	if len(m.manageKeys.auths) == 0 {
 		b.WriteString(m.s.Dim.Render("  No authorizations. This key cannot sign anything."))
@@ -371,7 +420,7 @@ func (m Model) viewKeyDetail() string {
 
 				// Expiry
 				if a.ExpiresAt != nil {
-					b.WriteString(m.s.Dim.Render(fmt.Sprintf("      expires: %s", a.ExpiresAt.Format("2006-01-02"))))
+					b.WriteString(m.s.Dim.Render(fmt.Sprintf("      expires: %s", a.ExpiresAt.Format("Jan 2, 2006 15:04"))))
 					b.WriteString("\n")
 				}
 			}
