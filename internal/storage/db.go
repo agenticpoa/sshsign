@@ -49,6 +49,9 @@ func Migrate(db *sql.DB) error {
 		`ALTER TABLE authorizations ADD COLUMN confirmation_tier TEXT NOT NULL DEFAULT 'autonomous'`,
 		`ALTER TABLE signing_keys ADD COLUMN sign_count INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE signing_keys ADD COLUMN last_used_at TEXT`,
+		`ALTER TABLE authorizations ADD COLUMN require_signature BOOLEAN NOT NULL DEFAULT 0`,
+		`ALTER TABLE pending_signatures ADD COLUMN approval_token TEXT`,
+		`ALTER TABLE pending_signatures ADD COLUMN signing_session_id TEXT`,
 	}
 	for _, m := range columnMigrations {
 		_, err := db.Exec(m)
@@ -134,4 +137,11 @@ CREATE TABLE IF NOT EXISTS negotiation_offers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_negotiation_offers_neg_id ON negotiation_offers(negotiation_id, round);
+
+CREATE TABLE IF NOT EXISTS evidence_envelopes (
+	pending_id  TEXT PRIMARY KEY REFERENCES pending_signatures(id),
+	data        BLOB NOT NULL,
+	hash        TEXT NOT NULL,
+	created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `

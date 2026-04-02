@@ -51,6 +51,7 @@ type Authorization struct {
 	Constraints         map[string][]string  // e.g. {"repos": ["github.com/user/*"]}
 	MetadataConstraints []MetadataConstraint // typed constraints on metadata fields
 	ConfirmationTier    string               // "autonomous" (default) or "cosign"
+	RequireSignature    bool                 // if true, cosign approval needs handwritten signature via web
 	HardRules           []string             // e.g. ["never sign to main branch"]
 	SoftRules           []string             // e.g. ["alert if >10 sigs/hour"]
 	ExpiresAt           *time.Time
@@ -60,17 +61,28 @@ type Authorization struct {
 
 // PendingSignature represents a signature request held for co-sign approval.
 type PendingSignature struct {
-	ID           string
-	SigningKeyID string
-	AuthTokenID  string
-	RequesterID  string
-	DocType      string
-	PayloadHash  string
-	Metadata     string // JSON string
-	Status       string // "pending", "approved", "denied"
-	CreatedAt    time.Time
-	ResolvedAt   *time.Time
-	ResolvedBy   string
+	ID               string
+	SigningKeyID     string
+	AuthTokenID      string
+	RequesterID      string
+	DocType          string
+	PayloadHash      string
+	Metadata         string // JSON string
+	Status           string // "pending", "approved", "denied"
+	ApprovalToken    string // random token for web approval URL
+	SigningSessionID string // groups related pendings in a multi-party signing
+	CreatedAt        time.Time
+	ResolvedAt       *time.Time
+	ResolvedBy       string
+}
+
+// EvidenceEnvelope is a sealed JSON blob binding a handwritten signature
+// to the document context. The image lives inside and nowhere else.
+type EvidenceEnvelope struct {
+	PendingID string
+	Data      []byte // sealed JSON
+	Hash      string // SHA256 of Data
+	CreatedAt time.Time
 }
 
 // NegotiationOffer represents a single offer in a negotiation chain.

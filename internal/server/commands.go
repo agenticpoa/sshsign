@@ -259,7 +259,7 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 	if decision.ConfirmationTier == "cosign" {
 		ps, err := storage.CreatePendingSignature(
 			sc.DB, sk.KeyID, decision.TokenID, sc.User.UserID,
-			actionType, payloadHash, metadataJSON,
+			actionType, payloadHash, metadataJSON, "", "",
 		)
 		if err != nil {
 			writeJSON(sess, errorResponse{Error: fmt.Sprintf("creating pending signature: %v", err)})
@@ -538,7 +538,7 @@ func handleCreateKey(sess ssh.Session, sc *SessionContext, args []string) {
 	expires := time.Now().AddDate(0, 0, expiryDays)
 	authorization, err := storage.CreateAuthorizationFull(
 		sc.DB, sk.KeyID, sc.User.UserID,
-		[]string{scope}, nil, metaConstraints, tier,
+		[]string{scope}, nil, metaConstraints, tier, false,
 		nil, nil, &expires,
 	)
 	if err != nil {

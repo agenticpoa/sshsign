@@ -1111,7 +1111,7 @@ func (m Model) handleCreateAuth() (tea.Model, tea.Cmd) {
 
 	_, err := storage.CreateAuthorizationFull(
 		m.authSetup.db, m.authSetup.selectedKeyID, m.authSetup.user.UserID,
-		scopes, constraints, metaConstraints, m.authSetup.confirmationTier,
+		scopes, constraints, metaConstraints, m.authSetup.confirmationTier, false,
 		hardRules, softRules, &expires,
 	)
 	if err != nil {

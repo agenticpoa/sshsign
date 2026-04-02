@@ -7,13 +7,21 @@ import (
 )
 
 // CreatePendingSignature inserts a new pending signature request.
-func CreatePendingSignature(db *sql.DB, signingKeyID, authTokenID, requesterID, docType, payloadHash, metadata string) (*PendingSignature, error) {
+func CreatePendingSignature(db *sql.DB, signingKeyID, authTokenID, requesterID, docType, payloadHash, metadata, approvalToken, signingSessionID string) (*PendingSignature, error) {
 	id := NewPendingID()
 
+	var tokenPtr, sessionPtr *string
+	if approvalToken != "" {
+		tokenPtr = &approvalToken
+	}
+	if signingSessionID != "" {
+		sessionPtr = &signingSessionID
+	}
+
 	_, err := db.Exec(
-		`INSERT INTO pending_signatures (id, signing_key_id, auth_token_id, requester_id, doc_type, payload_hash, metadata)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, signingKeyID, authTokenID, requesterID, docType, payloadHash, metadata,
+		`INSERT INTO pending_signatures (id, signing_key_id, auth_token_id, requester_id, doc_type, payload_hash, metadata, approval_token, signing_session_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, signingKeyID, authTokenID, requesterID, docType, payloadHash, metadata, tokenPtr, sessionPtr,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("inserting pending signature: %w", err)
@@ -25,19 +33,22 @@ func CreatePendingSignature(db *sql.DB, signingKeyID, authTokenID, requesterID, 
 // GetPendingSignature retrieves a pending signature by ID.
 func GetPendingSignature(db *sql.DB, id string) (*PendingSignature, error) {
 	row := db.QueryRow(
-		`SELECT id, signing_key_id, auth_token_id, requester_id, doc_type, payload_hash, metadata, status, created_at, resolved_at, resolved_by
+		`SELECT id, signing_key_id, auth_token_id, requester_id, doc_type, payload_hash, metadata, status, approval_token, signing_session_id, created_at, resolved_at, resolved_by
 		 FROM pending_signatures WHERE id = ?`, id,
 	)
+	return scanPendingRow(row)
+}
 
+func scanPendingRow(s interface{ Scan(...any) error }) (*PendingSignature, error) {
 	var ps PendingSignature
-	var metadata *string
+	var metadata, approvalToken, signingSessionID *string
 	var createdAt string
-	var resolvedAt *string
-	var resolvedBy *string
+	var resolvedAt, resolvedBy *string
 
-	err := row.Scan(
+	err := s.Scan(
 		&ps.ID, &ps.SigningKeyID, &ps.AuthTokenID, &ps.RequesterID,
 		&ps.DocType, &ps.PayloadHash, &metadata, &ps.Status,
+		&approvalToken, &signingSessionID,
 		&createdAt, &resolvedAt, &resolvedBy,
 	)
 	if err == sql.ErrNoRows {
@@ -49,6 +60,12 @@ func GetPendingSignature(db *sql.DB, id string) (*PendingSignature, error) {
 
 	if metadata != nil {
 		ps.Metadata = *metadata
+	}
+	if approvalToken != nil {
+		ps.ApprovalToken = *approvalToken
+	}
+	if signingSessionID != nil {
+		ps.SigningSessionID = *signingSessionID
 	}
 	ps.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
 	if resolvedAt != nil {
@@ -66,7 +83,7 @@ func GetPendingSignature(db *sql.DB, id string) (*PendingSignature, error) {
 // The principal is the user who created the authorization, identified by the granted_by field.
 func ListPendingSignatures(db *sql.DB, principalID string) ([]PendingSignature, error) {
 	rows, err := db.Query(
-		`SELECT ps.id, ps.signing_key_id, ps.auth_token_id, ps.requester_id, ps.doc_type, ps.payload_hash, ps.metadata, ps.status, ps.created_at, ps.resolved_at, ps.resolved_by
+		`SELECT ps.id, ps.signing_key_id, ps.auth_token_id, ps.requester_id, ps.doc_type, ps.payload_hash, ps.metadata, ps.status, ps.approval_token, ps.signing_session_id, ps.created_at, ps.resolved_at, ps.resolved_by
 		 FROM pending_signatures ps
 		 JOIN authorizations a ON ps.auth_token_id = a.token_id
 		 WHERE a.granted_by = ? AND ps.status = 'pending'
@@ -80,34 +97,11 @@ func ListPendingSignatures(db *sql.DB, principalID string) ([]PendingSignature, 
 
 	var results []PendingSignature
 	for rows.Next() {
-		var ps PendingSignature
-		var metadata *string
-		var createdAt string
-		var resolvedAt *string
-		var resolvedBy *string
-
-		err := rows.Scan(
-			&ps.ID, &ps.SigningKeyID, &ps.AuthTokenID, &ps.RequesterID,
-			&ps.DocType, &ps.PayloadHash, &metadata, &ps.Status,
-			&createdAt, &resolvedAt, &resolvedBy,
-		)
+		ps, err := scanPendingRow(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scanning pending signature row: %w", err)
+			return nil, err
 		}
-
-		if metadata != nil {
-			ps.Metadata = *metadata
-		}
-		ps.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
-		if resolvedAt != nil {
-			t, _ := time.Parse("2006-01-02 15:04:05", *resolvedAt)
-			ps.ResolvedAt = &t
-		}
-		if resolvedBy != nil {
-			ps.ResolvedBy = *resolvedBy
-		}
-
-		results = append(results, ps)
+		results = append(results, *ps)
 	}
 	return results, rows.Err()
 }

@@ -37,7 +37,7 @@ func setupUserWithCosignAuth(t *testing.T, ts *testServer, scopes []string, meta
 	}
 
 	_, err = storage.CreateAuthorizationFull(ts.db.DB, sk.KeyID, user.UserID,
-		scopes, nil, metadataConstraints, "cosign", nil, nil, nil)
+		scopes, nil, metadataConstraints, "cosign", false, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("creating cosign authorization: %v", err)
 	}
