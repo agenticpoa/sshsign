@@ -120,11 +120,13 @@ func newEditableConstraint(ct constraintTemplate) editableConstraint {
 	}
 	ec.minInput = newStaticCursorInput()
 	ec.minInput.Width = 20
+	ec.minInput.Validate = validateNumeric
 	if ct.DefaultMin != nil {
 		ec.minInput.SetValue(formatNumber(*ct.DefaultMin))
 	}
 	ec.maxInput = newStaticCursorInput()
 	ec.maxInput.Width = 20
+	ec.maxInput.Validate = validateNumeric
 	if ct.DefaultMax != nil {
 		ec.maxInput.SetValue(formatNumber(*ct.DefaultMax))
 	}
@@ -297,18 +299,26 @@ func newAuthSetupFromExisting(db *sql.DB, user *storage.User, keyID string, exis
 	return m
 }
 
-// newStaticCursorInput creates a textinput with a static cursor.
-// The default blinking cursor relies on terminal escape sequences
-// that don't work reliably over SSH (wish). We also set an explicit
-// reverse-color style because the default Reverse(true) escape
-// may not be supported by all SSH terminal transports.
+// newStaticCursorInput creates a textinput with a visible cursor over SSH.
+// The default blinking cursor and Reverse(true) styling don't work reliably
+// over SSH (wish). We use CursorStatic with a block character so the cursor
+// is always visible regardless of terminal escape support.
 func newStaticCursorInput() textinput.Model {
 	input := textinput.New()
 	input.Cursor.SetMode(cursor.CursorStatic)
+	input.Cursor.SetChar("█")
 	input.Cursor.Style = lipgloss.NewStyle().
-		Background(lipgloss.Color("252")).
-		Foreground(lipgloss.Color("0"))
+		Foreground(lipgloss.Color("15"))
 	return input
+}
+
+// validateNumeric rejects any character that isn't part of a valid number.
+func validateNumeric(s string) error {
+	if s == "" || s == "-" || s == "." || s == "-." {
+		return nil
+	}
+	_, err := strconv.ParseFloat(s, 64)
+	return err
 }
 
 func newRepoInput() textinput.Model {
@@ -840,8 +850,10 @@ func (m Model) updateAddConstraintField(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.authSetup.addSubStep = addStepValues
 		m.authSetup.newMinInput = newStaticCursorInput()
 		m.authSetup.newMinInput.Width = 20
+		m.authSetup.newMinInput.Validate = validateNumeric
 		m.authSetup.newMaxInput = newStaticCursorInput()
 		m.authSetup.newMaxInput.Width = 20
+		m.authSetup.newMaxInput.Validate = validateNumeric
 		m.authSetup.newAllowedInput = newStaticCursorInput()
 		m.authSetup.newAllowedInput.Width = 40
 		m.authSetup.newAllowedInput.Placeholder = "comma-separated values"
