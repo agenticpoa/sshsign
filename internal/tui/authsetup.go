@@ -664,14 +664,15 @@ func (m Model) updateAuthEditConstraintInline(msg tea.Msg) (tea.Model, tea.Cmd) 
 			return m, nil
 		case "tab":
 			if ec.tmpl.Type == "range" {
+				var cmd tea.Cmd
 				if ec.minInput.Focused() {
 					ec.minInput.Blur()
-					ec.maxInput.Focus()
+					cmd = ec.maxInput.Focus()
 				} else {
 					ec.maxInput.Blur()
-					ec.minInput.Focus()
+					cmd = ec.minInput.Focus()
 				}
-				return m, nil
+				return m, cmd
 			}
 		}
 	}
@@ -736,8 +737,8 @@ func (m Model) updateEnumEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// "Add custom value" selected
 				ec.enumAddingNew = true
 				ec.enumNewInput.SetValue("")
-				ec.enumNewInput.Focus()
-				return m, nil
+				cmd := ec.enumNewInput.Focus()
+				return m, cmd
 			}
 			// Save: collect checked values and exit edit mode
 			ec.allowed = checkedEnumValues(ec.enumOptions)
@@ -805,8 +806,8 @@ func (m Model) updateAddConstraintType(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.authSetup.newFieldInput = newStaticCursorInput()
 			m.authSetup.newFieldInput.Placeholder = "field name (e.g. valuation_cap)"
 			m.authSetup.newFieldInput.Width = 40
-			m.authSetup.newFieldInput.Focus()
-			return m, nil
+			cmd := m.authSetup.newFieldInput.Focus()
+			return m, cmd
 		}
 	}
 	return m, nil
@@ -845,22 +846,23 @@ func (m Model) updateAddConstraintField(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.authSetup.newAllowedInput.Width = 40
 		m.authSetup.newAllowedInput.Placeholder = "comma-separated values"
 
+		var cmd tea.Cmd
 		switch selectedType {
 		case "range":
 			m.authSetup.newMinInput.Placeholder = "minimum"
 			m.authSetup.newMaxInput.Placeholder = "maximum"
-			m.authSetup.newMinInput.Focus()
+			cmd = m.authSetup.newMinInput.Focus()
 		case "minimum":
 			m.authSetup.newMinInput.Placeholder = "minimum value"
-			m.authSetup.newMinInput.Focus()
+			cmd = m.authSetup.newMinInput.Focus()
 		case "maximum":
 			m.authSetup.newMaxInput.Placeholder = "maximum value"
-			m.authSetup.newMaxInput.Focus()
+			cmd = m.authSetup.newMaxInput.Focus()
 		case "enum":
-			m.authSetup.newAllowedInput.Focus()
+			cmd = m.authSetup.newAllowedInput.Focus()
 		}
 
-		return m, nil
+		return m, cmd
 	}
 	var cmd tea.Cmd
 	m.authSetup.newFieldInput, cmd = m.authSetup.newFieldInput.Update(msg)
@@ -906,14 +908,15 @@ func (m Model) updateAddConstraintValues(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "tab":
 			if selectedType == "range" {
+				var cmd tea.Cmd
 				if m.authSetup.newMinInput.Focused() {
 					m.authSetup.newMinInput.Blur()
-					m.authSetup.newMaxInput.Focus()
+					cmd = m.authSetup.newMaxInput.Focus()
 				} else {
 					m.authSetup.newMaxInput.Blur()
-					m.authSetup.newMinInput.Focus()
+					cmd = m.authSetup.newMinInput.Focus()
 				}
-				return m, nil
+				return m, cmd
 			}
 		}
 	}
