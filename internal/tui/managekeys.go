@@ -49,15 +49,15 @@ func (mk *manageKeysModel) refreshKeys() {
 }
 
 // sortKeysActiveFirst sorts keys so active keys come before revoked ones,
-// preserving creation order within each group.
+// newest first within each group.
 func sortKeysActiveFirst(keys []storage.SigningKey) {
 	sort.SliceStable(keys, func(i, j int) bool {
 		iRevoked := keys[i].RevokedAt != nil
 		jRevoked := keys[j].RevokedAt != nil
 		if iRevoked != jRevoked {
-			return !iRevoked // active (not revoked) comes first
+			return !iRevoked
 		}
-		return false // preserve original order within group
+		return keys[i].CreatedAt.After(keys[j].CreatedAt)
 	})
 }
 
