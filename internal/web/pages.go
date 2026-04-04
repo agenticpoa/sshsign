@@ -17,7 +17,7 @@ func approvalPage(ps *storage.PendingSignature, auth *storage.Authorization) str
 	var termsHTML strings.Builder
 	for k, v := range metadata {
 		label := html.EscapeString(formatFieldLabel(k))
-		value := html.EscapeString(fmt.Sprintf("%v", v))
+		value := html.EscapeString(formatTermValue(v))
 		termsHTML.WriteString(fmt.Sprintf(`<div class="term"><span class="term-label">%s</span><span class="term-value">%s</span></div>`, label, value))
 	}
 
@@ -272,12 +272,47 @@ func formatConstraintRange(mc storage.MetadataConstraint) string {
 	return mc.Type
 }
 
+func formatTermValue(v any) string {
+	switch val := v.(type) {
+	case float64:
+		if val == float64(int64(val)) {
+			return formatIntWithCommas(int64(val))
+		}
+		return fmt.Sprintf("%g", val)
+	case bool:
+		if val {
+			return "Yes"
+		}
+		return "No"
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
 func formatNum(v *float64) string {
 	if v == nil {
 		return "?"
 	}
 	if *v == float64(int64(*v)) {
-		return fmt.Sprintf("%d", int64(*v))
+		return formatIntWithCommas(int64(*v))
 	}
 	return fmt.Sprintf("%.2f", *v)
+}
+
+func formatIntWithCommas(n int64) string {
+	s := fmt.Sprintf("%d", n)
+	if n < 0 {
+		return "-" + formatIntWithCommas(-n)
+	}
+	if len(s) <= 3 {
+		return s
+	}
+	var result strings.Builder
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result.WriteByte(',')
+		}
+		result.WriteRune(c)
+	}
+	return result.String()
 }
