@@ -9,16 +9,30 @@ import (
 	"github.com/agenticpoa/sshsign/internal/storage"
 )
 
+// partyFields are metadata keys that describe parties, not deal terms.
+var partyFields = map[string]bool{
+	"founder_name": true, "founder_title": true, "founder_company": true, "founder_email": true,
+	"investor_name": true, "investor_title": true, "investor_company": true, "investor_email": true,
+	"company_name": true, "party_name": true,
+}
+
 func approvalPage(ps *storage.PendingSignature, auth *storage.Authorization) string {
 	// Parse metadata for display
 	var metadata map[string]any
 	json.Unmarshal([]byte(ps.Metadata), &metadata)
 
+	// Split metadata into party info and deal terms
+	var partyInfoHTML strings.Builder
 	var termsHTML strings.Builder
 	for k, v := range metadata {
 		label := html.EscapeString(formatFieldLabel(k))
 		value := html.EscapeString(formatTermValue(k, v))
-		termsHTML.WriteString(fmt.Sprintf(`<div class="term"><span class="term-label">%s</span><span class="term-value">%s</span></div>`, label, value))
+		row := fmt.Sprintf(`<div class="party"><span class="party-label">%s</span><span class="party-value">%s</span></div>`, label, value)
+		if partyFields[k] {
+			partyInfoHTML.WriteString(row)
+		} else {
+			termsHTML.WriteString(fmt.Sprintf(`<div class="term"><span class="term-label">%s</span><span class="term-value">%s</span></div>`, label, value))
+		}
 	}
 
 	// Constraint summary
@@ -83,8 +97,9 @@ func approvalPage(ps *storage.PendingSignature, auth *storage.Authorization) str
 
     <div class="section-label">Parties</div>
     <div class="parties">
-      <div class="party"><span class="party-label">Requested by</span><span class="party-value">%s</span></div>
-      <div class="party"><span class="party-label">Signing as</span><span class="party-value">%s</span></div>
+      %s
+      <div class="party"><span class="party-label">Requested by</span><span class="party-value mono">%s</span></div>
+      <div class="party"><span class="party-label">Signing as</span><span class="party-value mono">%s</span></div>
       <div class="party"><span class="party-label">Key</span><span class="party-value mono">%s</span></div>
       <div class="party"><span class="party-label">Submitted</span><span class="party-value">%s</span></div>
     </div>
@@ -230,6 +245,7 @@ async function submitSignature() {
 </script>
 </body>
 </html>`, scope,
+		partyInfoHTML.String(),
 		html.EscapeString(ps.RequesterID),
 		html.EscapeString(auth.GrantedBy),
 		html.EscapeString(ps.SigningKeyID),
@@ -257,12 +273,21 @@ func approvalAlreadyDonePage(status string) string {
 
 // knownLabels maps field names to display labels for common acronyms and terms.
 var knownLabels = map[string]string{
-	"mfn":            "Most Favored Nation",
-	"pro_rata":       "Pro-Rata Rights",
-	"valuation_cap":  "Valuation Cap",
-	"discount_rate":  "Discount Rate",
-	"nda_type":       "NDA Type",
-	"term_years":     "Term (Years)",
+	"mfn":              "Most Favored Nation",
+	"pro_rata":         "Pro-Rata Rights",
+	"valuation_cap":    "Valuation Cap",
+	"discount_rate":    "Discount Rate",
+	"nda_type":         "NDA Type",
+	"term_years":       "Term (Years)",
+	"founder_name":     "Founder",
+	"founder_title":    "Title",
+	"founder_company":  "Company",
+	"founder_email":    "Email",
+	"investor_name":    "Investor",
+	"investor_title":   "Title",
+	"investor_company": "Firm",
+	"investor_email":   "Email",
+	"company_name":     "Company",
 }
 
 func formatFieldLabel(field string) string {
