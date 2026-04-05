@@ -17,7 +17,7 @@ func approvalPage(ps *storage.PendingSignature, auth *storage.Authorization) str
 	var termsHTML strings.Builder
 	for k, v := range metadata {
 		label := html.EscapeString(formatFieldLabel(k))
-		value := html.EscapeString(formatTermValue(v))
+		value := html.EscapeString(formatTermValue(k, v))
 		termsHTML.WriteString(fmt.Sprintf(`<div class="term"><span class="term-label">%s</span><span class="term-value">%s</span></div>`, label, value))
 	}
 
@@ -49,6 +49,11 @@ func approvalPage(ps *storage.PendingSignature, auth *storage.Authorization) str
   .term { display: flex; justify-content: space-between; padding: 6px 0; }
   .term-label { color: #8b949e; }
   .term-value { color: #e6edf3; font-weight: 500; }
+  .parties { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+  .party { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+  .party-label { color: #8b949e; }
+  .party-value { color: #e6edf3; }
+  .mono { font-family: monospace; font-size: 12px; }
   .constraints { font-size: 13px; color: #8b949e; margin-bottom: 20px; }
   .constraint { padding: 2px 0; }
   .consent { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; font-size: 14px; color: #8b949e; cursor: pointer; }
@@ -75,6 +80,14 @@ func approvalPage(ps *storage.PendingSignature, auth *storage.Authorization) str
   <div id="review">
     <h1>Review &amp; Sign</h1>
     <div class="scope">%s</div>
+
+    <div class="section-label">Parties</div>
+    <div class="parties">
+      <div class="party"><span class="party-label">Requested by</span><span class="party-value">%s</span></div>
+      <div class="party"><span class="party-label">Signing as</span><span class="party-value">%s</span></div>
+      <div class="party"><span class="party-label">Key</span><span class="party-value mono">%s</span></div>
+      <div class="party"><span class="party-label">Submitted</span><span class="party-value">%s</span></div>
+    </div>
 
     <div class="section-label">Agreed Terms</div>
     <div class="terms">%s</div>
@@ -216,7 +229,13 @@ async function submitSignature() {
 }
 </script>
 </body>
-</html>`, scope, termsHTML.String(), constraintsHTML.String())
+</html>`, scope,
+		html.EscapeString(ps.RequesterID),
+		html.EscapeString(auth.GrantedBy),
+		html.EscapeString(ps.SigningKeyID),
+		html.EscapeString(ps.CreatedAt.Format("Jan 2, 2006 15:04 UTC")),
+		termsHTML.String(),
+		constraintsHTML.String())
 }
 
 func approvalAlreadyDonePage(status string) string {
@@ -236,7 +255,20 @@ func approvalAlreadyDonePage(status string) string {
 </html>`, msg)
 }
 
+// knownLabels maps field names to display labels for common acronyms and terms.
+var knownLabels = map[string]string{
+	"mfn":            "Most Favored Nation",
+	"pro_rata":       "Pro-Rata Rights",
+	"valuation_cap":  "Valuation Cap",
+	"discount_rate":  "Discount Rate",
+	"nda_type":       "NDA Type",
+	"term_years":     "Term (Years)",
+}
+
 func formatFieldLabel(field string) string {
+	if label, ok := knownLabels[field]; ok {
+		return label
+	}
 	return strings.ReplaceAll(strings.Title(strings.ReplaceAll(field, "_", " ")), " ", " ")
 }
 
@@ -254,13 +286,27 @@ func formatScope(scope string) string {
 }
 
 func formatConstraintRange(mc storage.MetadataConstraint) string {
+	fmtVal := func(v *float64) string {
+		if rateFields[mc.Field] {
+			if v == nil {
+				return "?"
+			}
+			return fmt.Sprintf("%.0f%%", *v*100)
+		}
+		s := formatNum(v)
+		if currencyFields[mc.Field] {
+			return "$" + s
+		}
+		return s
+	}
+
 	switch mc.Type {
 	case "range":
-		return fmt.Sprintf("%s - %s", formatNum(mc.Min), formatNum(mc.Max))
+		return fmt.Sprintf("%s - %s", fmtVal(mc.Min), fmtVal(mc.Max))
 	case "minimum":
-		return fmt.Sprintf("min %s", formatNum(mc.Min))
+		return fmt.Sprintf("min %s", fmtVal(mc.Min))
 	case "maximum":
-		return fmt.Sprintf("max %s", formatNum(mc.Max))
+		return fmt.Sprintf("max %s", fmtVal(mc.Max))
 	case "enum":
 		return strings.Join(mc.Allowed, ", ")
 	case "required_bool":
@@ -272,9 +318,28 @@ func formatConstraintRange(mc storage.MetadataConstraint) string {
 	return mc.Type
 }
 
-func formatTermValue(v any) string {
+// rateFields are displayed as percentages (0.2 -> 20%).
+var rateFields = map[string]bool{
+	"discount_rate": true,
+}
+
+// currencyFields are displayed with $ prefix.
+var currencyFields = map[string]bool{
+	"valuation_cap": true,
+}
+
+func formatTermValue(field string, v any) string {
 	switch val := v.(type) {
 	case float64:
+		if rateFields[field] {
+			return fmt.Sprintf("%.0f%%", val*100)
+		}
+		if currencyFields[field] {
+			if val == float64(int64(val)) {
+				return "$" + formatIntWithCommas(int64(val))
+			}
+			return fmt.Sprintf("$%.2f", val)
+		}
 		if val == float64(int64(val)) {
 			return formatIntWithCommas(int64(val))
 		}
