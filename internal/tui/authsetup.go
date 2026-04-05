@@ -69,6 +69,7 @@ type authSetupModel struct {
 	// Confirmation tier
 	confirmationTier string
 	tierCursor       int
+	requireSignature bool
 
 	// Custom constraint builder
 	addSubStep       addConstraintStep
@@ -245,6 +246,7 @@ func newAuthSetupFromExisting(db *sql.DB, user *storage.User, keyID string, exis
 
 	// Pre-fill confirmation tier
 	m.confirmationTier = existing.ConfirmationTier
+	m.requireSignature = existing.RequireSignature
 	if existing.ConfirmationTier == "cosign" {
 		m.tierCursor = 1
 	} else {
@@ -1000,9 +1002,14 @@ func (m Model) updateAuthTier(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.authSetup.tierCursor < 1 {
 				m.authSetup.tierCursor++
 			}
+		case " ":
+			if m.authSetup.tierCursor == 1 {
+				m.authSetup.requireSignature = !m.authSetup.requireSignature
+			}
 		case "enter":
 			if m.authSetup.tierCursor == 0 {
 				m.authSetup.confirmationTier = "autonomous"
+				m.authSetup.requireSignature = false
 			} else {
 				m.authSetup.confirmationTier = "cosign"
 			}
@@ -1111,7 +1118,7 @@ func (m Model) handleCreateAuth() (tea.Model, tea.Cmd) {
 
 	_, err := storage.CreateAuthorizationFull(
 		m.authSetup.db, m.authSetup.selectedKeyID, m.authSetup.user.UserID,
-		scopes, constraints, metaConstraints, m.authSetup.confirmationTier, false,
+		scopes, constraints, metaConstraints, m.authSetup.confirmationTier, m.authSetup.requireSignature,
 		hardRules, softRules, &expires,
 	)
 	if err != nil {
@@ -1604,15 +1611,27 @@ func (m Model) viewStepTier(b *strings.Builder, step, total int) {
 		if i == m.authSetup.tierCursor {
 			b.WriteString(m.s.Dim.Render(fmt.Sprintf("      %s", t.desc)))
 			b.WriteString("\n")
+			if i == 1 { // cosign selected
+				check := "[ ]"
+				if m.authSetup.requireSignature {
+					check = "[x]"
+				}
+				b.WriteString(m.s.Dim.Render(fmt.Sprintf("      %s Require handwritten signature", check)))
+				b.WriteString("\n")
+			}
 		}
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(m.buildHints([]hint{
+	hints := []hint{
 		{"j/k", "navigate", hintNav},
 		{"enter", "select", hintAction},
 		{"esc", "back", hintNav},
-	}))
+	}
+	if m.authSetup.tierCursor == 1 {
+		hints = append([]hint{{"space", "toggle signature", hintAction}}, hints...)
+	}
+	b.WriteString(m.buildHints(hints))
 }
 
 func (m Model) viewStepExpiry(b *strings.Builder, step, total int) {
@@ -1667,8 +1686,12 @@ func (m Model) viewStepConfirm(b *strings.Builder, step, total int) {
 	b.WriteString("\n")
 
 	// Tier
+	tierLabel := m.authSetup.confirmationTier
+	if m.authSetup.requireSignature {
+		tierLabel += " + handwritten signature"
+	}
 	b.WriteString(m.s.InfoLabel.Render("  Tier      "))
-	b.WriteString(m.s.Info.Render(m.authSetup.confirmationTier))
+	b.WriteString(m.s.Info.Render(tierLabel))
 	b.WriteString("\n")
 
 	// Repo (git-commit only)

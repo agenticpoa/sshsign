@@ -102,6 +102,7 @@ type pendingSignResponse struct {
 	PendingID         string `json:"pending_id"`
 	RequiresSignature bool   `json:"requires_signature,omitempty"`
 	ApprovalURL       string `json:"approval_url,omitempty"`
+	SigningSessionID  string `json:"signing_session_id,omitempty"`
 }
 
 type errorResponse struct {
@@ -123,7 +124,7 @@ func writeJSON(sess ssh.Session, v any) {
 // handleSign processes: ssh sign.agenticpoa.com sign --type git-commit [--key-id ak_xxx]
 // Reads payload from stdin, signs it, returns JSON with signature.
 func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
-	var actionType, keyID, repo, branch, metadataJSON string
+	var actionType, keyID, repo, branch, metadataJSON, sessionID string
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -135,6 +136,11 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 		case "--key-id":
 			if i+1 < len(args) {
 				keyID = args[i+1]
+				i++
+			}
+		case "--session-id":
+			if i+1 < len(args) {
+				sessionID = args[i+1]
 				i++
 			}
 		case "--repo":
@@ -279,7 +285,7 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 
 		ps, err := storage.CreatePendingSignature(
 			sc.DB, sk.KeyID, decision.TokenID, sc.User.UserID,
-			actionType, payloadHash, metadataJSON, approvalToken, "",
+			actionType, payloadHash, metadataJSON, approvalToken, sessionID,
 		)
 		if err != nil {
 			writeJSON(sess, errorResponse{Error: fmt.Sprintf("creating pending signature: %v", err)})
@@ -289,8 +295,9 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 		log.Printf("PENDING_COSIGN %s for %s key %s pending_id=%s require_sig=%v", actionType, sc.User.UserID, sk.KeyID, ps.ID, decision.RequireSignature)
 
 		resp := pendingSignResponse{
-			Status:    "pending_cosign",
-			PendingID: ps.ID,
+			Status:           "pending_cosign",
+			PendingID:        ps.ID,
+			SigningSessionID: sessionID,
 		}
 		if decision.RequireSignature {
 			resp.RequiresSignature = true
