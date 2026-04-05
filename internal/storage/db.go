@@ -52,6 +52,7 @@ func Migrate(db *sql.DB) error {
 		`ALTER TABLE authorizations ADD COLUMN require_signature BOOLEAN NOT NULL DEFAULT 0`,
 		`ALTER TABLE pending_signatures ADD COLUMN approval_token TEXT`,
 		`ALTER TABLE pending_signatures ADD COLUMN signing_session_id TEXT`,
+		`ALTER TABLE pending_signatures ADD COLUMN signature TEXT`,
 	}
 	for _, m := range columnMigrations {
 		_, err := db.Exec(m)

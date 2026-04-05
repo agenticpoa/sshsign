@@ -758,8 +758,8 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	// Mark as approved
-	if err := storage.ResolvePendingSignature(sc.DB, pendingID, "approved", sc.User.UserID); err != nil {
+	// Mark as approved and persist signature
+	if err := storage.ResolvePendingSignature(sc.DB, pendingID, "approved", sc.User.UserID, string(sig)); err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("resolving pending signature: %v", err)})
 		return
 	}
@@ -787,6 +787,59 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 }
 
 // handleDeny denies a pending signature and logs the denial.
+// handleGetEnvelope processes: ssh host get-envelope --id pnd_xxx
+// Returns the sealed evidence envelope with the handwritten signature image.
+func handleGetEnvelope(sess ssh.Session, sc *SessionContext, args []string) {
+	var pendingID string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--id" && i+1 < len(args) {
+			pendingID = args[i+1]
+			i++
+		}
+	}
+
+	if pendingID == "" {
+		writeJSON(sess, errorResponse{Error: "missing --id"})
+		return
+	}
+
+	ps, err := storage.GetPendingSignature(sc.DB, pendingID)
+	if err != nil || ps == nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("pending signature %s not found", pendingID)})
+		return
+	}
+
+	// Verify the caller owns the pending (is the principal or the requester)
+	authToken, _ := storage.GetAuthorization(sc.DB, ps.AuthTokenID)
+	if authToken == nil || (authToken.GrantedBy != sc.User.UserID && ps.RequesterID != sc.User.UserID) {
+		writeJSON(sess, errorResponse{Error: "not authorized to access this pending signature"})
+		return
+	}
+
+	// Build response with status info
+	resp := map[string]any{
+		"pending_id": ps.ID,
+		"status":     ps.Status,
+		"key_id":     ps.SigningKeyID,
+		"doc_type":   ps.DocType,
+	}
+
+	if ps.Signature != "" {
+		resp["signature"] = ps.Signature
+	}
+
+	// Get the evidence envelope if it exists
+	env, _ := storage.GetEvidenceEnvelope(sc.DB, pendingID)
+	if env != nil {
+		var envelopeJSON any
+		json.Unmarshal(env.Data, &envelopeJSON)
+		resp["envelope"] = envelopeJSON
+		resp["envelope_hash"] = env.Hash
+	}
+
+	writeJSON(sess, resp)
+}
+
 func handleDeny(sess ssh.Session, sc *SessionContext, args []string) {
 	var pendingID string
 	for i := 0; i < len(args); i++ {
@@ -823,7 +876,7 @@ func handleDeny(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	if err := storage.ResolvePendingSignature(sc.DB, pendingID, "denied", sc.User.UserID); err != nil {
+	if err := storage.ResolvePendingSignature(sc.DB, pendingID, "denied", sc.User.UserID, ""); err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("resolving pending signature: %v", err)})
 		return
 	}

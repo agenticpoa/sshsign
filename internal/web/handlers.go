@@ -197,8 +197,8 @@ func (s *Server) handlePostApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mark as approved
-	if err := storage.ResolvePendingSignature(s.db, ps.ID, "approved", auth.GrantedBy); err != nil {
+	// Mark as approved and persist signature
+	if err := storage.ResolvePendingSignature(s.db, ps.ID, "approved", auth.GrantedBy, string(sig)); err != nil {
 		log.Printf("error resolving %s: %v", pendingID, err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return

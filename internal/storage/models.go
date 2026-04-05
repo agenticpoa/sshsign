@@ -71,6 +71,7 @@ type PendingSignature struct {
 	Status           string // "pending", "approved", "denied"
 	ApprovalToken    string // random token for web approval URL
 	SigningSessionID string // groups related pendings in a multi-party signing
+	Signature        string // SSHSIG signature, set on approval
 	CreatedAt        time.Time
 	ResolvedAt       *time.Time
 	ResolvedBy       string
