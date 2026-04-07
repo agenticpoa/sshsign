@@ -2,7 +2,7 @@
 
 # sshsign
 
-SSH-based signing service for AI agents. No accounts, no passwords, no OAuth. SSH key = identity, scoped token = authorization, immutable receipt = proof.
+SSH-based signing service for AI agents. No accounts, no passwords, no OAuth. SSH key = identity, scoped authorization = boundaries, immutable receipt = proof.
 
 ```
 ssh sshsign.dev
@@ -11,10 +11,11 @@ ssh sshsign.dev
 ## What it does
 
 - Agents and developers SSH in, identity detected from their public key
-- Create Ed25519 signing keys with scoped authorizations
-- Sign git commits (and arbitrary payloads) through the service
-- Every sign, deny, and revoke action is logged to an immutable audit trail
-- Signatures are PEM-armored SSH format, compatible with `git commit -S`
+- Create Ed25519 signing keys with scoped authorizations and metadata constraints
+- Sign git commits, legal agreements (SAFEs, NDAs), or arbitrary payloads
+- Co-sign approval flow: agents act, humans approve with optional handwritten signature
+- Negotiation logging with turn enforcement and immutable chain linking
+- Every sign, deny, and revoke is logged to an immutable audit trail (immudb)
 
 ## Quick start
 
@@ -29,11 +30,7 @@ ssh sshsign.dev
 1. Install the CLI:
 
 ```bash
-# Go install
 go install github.com/agenticpoa/sshsign/cmd/sshsign@latest
-
-# Or Homebrew
-brew install agenticpoa/tap/sshsign
 ```
 
 2. Pin the host key:
@@ -56,7 +53,7 @@ ssh sshsign.dev
 
 ```bash
 git config --global gpg.format ssh
-git config --global gpg.ssh.program "sshsign"  # must be on $PATH, or use full path e.g. ~/go/bin/sshsign
+git config --global gpg.ssh.program "sshsign"
 git config --global user.signingkey "ak_7xm3..."
 ```
 
@@ -66,107 +63,116 @@ git config --global user.signingkey "ak_7xm3..."
 git commit -S -m "signed commit"
 ```
 
-### Verifying signatures
-
-To verify signed commits, you need an `allowed_signers` file that maps email addresses to trusted public keys.
-
-1. Create the file:
-
-```bash
-mkdir -p ~/.config/git
-
-# Add one line per signer: <email> <public-key>
-echo "alice@example.com ssh-ed25519 AAAAC3Nza..." >> ~/.config/git/allowed_signers
-```
-
-2. Tell git where to find it:
-
-```bash
-git config --global gpg.ssh.allowedSignersFile ~/.config/git/allowed_signers
-```
-
-3. Verify:
-
-```bash
-git log --show-signature
-# or for a single commit
-git verify-commit HEAD
-```
-
 ## Programmatic interface
 
-Agents interact via SSH command arguments:
+All commands are SSH-based:
 
 ```bash
-# Sign a payload
-ssh sshsign.dev sign \
-  --type git-commit \
-  --key-id ak_7xm3... \
-  --repo github.com/user/repo \
-  < commit-data
+# Create a signing key with constraints
+ssh sshsign.dev create-key \
+  --scope safe-agreement \
+  --tier cosign \
+  --require-signature \
+  --constraints '{"valuation_cap": {"min": 5000000, "max": 15000000}, "discount_rate": {"min": 0.15}}'
 
-# Returns JSON: {"signature":"-----BEGIN SSH SIGNATURE-----\n...","key_id":"ak_7xm3...","audit_tx_id":42}
+# Sign a payload (cosign returns a pending ID + approval URL)
+echo '{"valuation_cap": 8000000}' | ssh sshsign.dev sign \
+  --type safe-agreement \
+  --key-id ak_xxx \
+  --metadata '{"valuation_cap": 8000000, "discount_rate": 0.20}'
 
-# List keys
+# Retrieve the evidence envelope after web approval
+ssh sshsign.dev get-envelope --id pnd_xxx
+
+# Log negotiation offers with turn enforcement
+ssh sshsign.dev log-offer \
+  --negotiation-id neg_xxx \
+  --round 0 --from founder --type offer \
+  --metadata '{"valuation_cap": 12000000}'
+
+# View negotiation history
+ssh sshsign.dev history --negotiation-id neg_xxx
+
+# List keys, revoke, approve, deny
 ssh sshsign.dev keys
-
-# Revoke a key
-ssh sshsign.dev revoke --key-id ak_7xm3...
+ssh sshsign.dev revoke --key-id ak_xxx
+ssh sshsign.dev approve --id pnd_xxx
+ssh sshsign.dev deny --id pnd_xxx
 ```
 
-## Running the server locally
+## Authorization model
+
+Each signing key has scoped authorizations with typed constraints:
+
+| Constraint type | Example |
+|----------------|---------|
+| `range` | Valuation cap between $5M and $15M |
+| `minimum` | Discount rate at least 15% |
+| `maximum` | Penalty no more than $500K |
+| `enum` | NDA type: mutual or one-way |
+| `required_bool` | Pro-rata rights required |
+
+**Confirmation tiers:**
+- **Autonomous** - agent signs immediately
+- **Co-sign** - requires human approval before signing
+- **Co-sign + handwritten signature** - human approves via web with a drawn signature, sealed into a tamper-evident evidence envelope
+
+## Web approval flow
+
+When an authorization has `require_signature` enabled, the sign response includes an approval URL:
+
+```
+https://sshsign.dev/approve/pnd_xxx?token=...
+```
+
+The approver opens this in a browser, reviews the agreed terms, draws their handwritten signature, and clicks "Sign & Approve". The signature image is sealed into an evidence envelope alongside the document hash, signer identity, IP, and timestamp. The image exists only inside the sealed envelope.
+
+## Running the server
 
 ```bash
-# Required: key encryption key for protecting signing keys at rest
-# Generate with: openssl rand -hex 32
-export SSHSIGN_KEK_SECRET="your-secret-here"
+export SSHSIGN_KEK_SECRET="$(openssl rand -hex 32)"
 
 # Optional
-export SSHSIGN_LISTEN_ADDR=":2222"        # default :2222
-export SSHSIGN_DB_PATH="./sshsign.db"     # default ./sshsign.db
-export SSHSIGN_HOST_KEY_PATH="./host_key" # default ./host_key
+export SSHSIGN_LISTEN_ADDR=":2222"
+export SSHSIGN_DB_PATH="./sshsign.db"
+export SSHSIGN_HOST_KEY_PATH="./host_key"
+export SSHSIGN_HTTP_ADDR=":8443"
+export SSHSIGN_HTTP_DOMAIN="sshsign.dev"
 
 # Optional: immudb for tamper-proof audit trail
-# Without immudb, audit events are stored in SQLite only.
-# This works fine for development but offers weaker tamper-evidence
-# guarantees since SQLite rows can be modified after the fact.
-# For production use, immudb provides cryptographic proof that
-# audit records have not been altered.
 export SSHSIGN_IMMUDB_ADDRESS="127.0.0.1"
-export SSHSIGN_IMMUDB_PORT="3322"
 
 go run ./cmd/sshsign-server/
-```
-
-Then connect:
-
-```bash
-ssh -p 2222 localhost
 ```
 
 ## Architecture
 
 ```
-Developer/Agent --SSH--> wish server
-                            |
-                   +--------+--------+
+Agent/Developer --SSH--> wish server --HTTP--> web approval
+                            |                    (signature
+                   +--------+--------+            capture)
                    |                 |
               Bubble Tea TUI   Programmatic CLI
                    |                 |
                    +--------+--------+
                             |
                    Authorization Engine
-                   (scopes, constraints,
-                    hard/soft rules)
+                   (scopes, typed constraints,
+                    hard/soft rules, cosign)
                             |
-                     Signing Engine
-                    (Ed25519, SSHSIG)
+                  +---------+---------+
+                  |         |         |
+               Signing   Evidence   Negotiation
+               Engine    Envelopes  Offers
+               (Ed25519) (sealed)   (turn-enforced)
+                  |         |         |
+                  +---------+---------+
                             |
                   +---------+---------+
                   |                   |
                SQLite             immudb
            (users, keys,      (immutable
-            tokens)            audit trail)
+            tokens, offers)    audit trail)
 ```
 
 ## Tech stack
@@ -176,26 +182,29 @@ Developer/Agent --SSH--> wish server
 | Language | Go |
 | SSH server | charmbracelet/wish |
 | Terminal UI | charmbracelet/bubbletea |
+| Web approval | net/http, HTML5 Canvas |
 | Signing | crypto/ed25519, SSHSIG format |
-| Authorization | Scoped tokens with constraints and rules |
+| Authorization | Scoped tokens with typed constraints and rules |
+| Evidence | Sealed JSON envelopes with SHA-256 binding |
 | Audit trail | codenotary/immudb |
-| Metadata | SQLite (modernc.org/sqlite, CGO-free) |
+| Storage | SQLite (modernc.org/sqlite, CGO-free) |
+
+## Related projects
+
+- [APOA](https://github.com/agenticpoa/apoa) - Agentic Power of Attorney specification
+- [negotiate](https://github.com/agenticpoa/negotiate) - AI agent negotiation protocol and SAFE demo
 
 ## Troubleshooting
 
-**"Permission denied (publickey)"** - The server doesn't recognize your SSH key. Make sure you have an SSH key (`ssh-add -l`) and that you've connected at least once to register it.
+**"Permission denied (publickey)"** - Make sure you have an SSH key (`ssh-add -l`) and that you've connected at least once to register it.
 
-**"Host key verification failed"** - You haven't pinned the host key yet. See step 2 in the quick start, or connect with `ssh -o StrictHostKeyChecking=accept-new sshsign.dev` to trust on first use.
+**"Host key verification failed"** - Pin the host key (see quick start step 2), or connect with `ssh -o StrictHostKeyChecking=accept-new sshsign.dev`.
 
-**Connection refused on port 2222** - When running locally, make sure the server is running and your firewall allows connections on the configured port.
+**"unknown key id"** - Run `ssh sshsign.dev keys` to list your keys and check the ID.
 
-**"unknown key id"** - The signing key ID in your git config doesn't match any key on the server. Run `ssh sshsign.dev keys` to list your keys and update `user.signingkey` accordingly.
+**"not your turn"** - Negotiation offers must alternate between parties.
 
-**immudb connection errors** - If `SSHSIGN_IMMUDB_ADDRESS` is set but immudb isn't running, the server will fail to start. Either start immudb or unset the variable to fall back to SQLite-only audit.
-
-## A note on the CLI name
-
-The `sshsign` binary acts as a drop-in `gpg.ssh.program` for git. This is unrelated to OpenSSH's built-in `ssh-keygen -Y sign` functionality. The CLI proxies signing requests to the sshsign server over SSH rather than signing locally.
+**"this approval requires a handwritten signature"** - The authorization has `require_signature` enabled. Open the approval URL in a browser to draw your signature.
 
 ## License
 
