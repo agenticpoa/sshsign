@@ -68,6 +68,27 @@ func ListNegotiationOffers(db *sql.DB, negotiationID string) ([]NegotiationOffer
 	return offers, rows.Err()
 }
 
+// GetLastOffer returns the most recent offer in a negotiation, or nil if none exist.
+func GetLastOffer(db *sql.DB, negotiationID string) (*NegotiationOffer, error) {
+	row := db.QueryRow(
+		`SELECT id, negotiation_id, round, from_party, offer_type, metadata, previous_tx, audit_tx_id, user_id, created_at
+		 FROM negotiation_offers WHERE negotiation_id = ?
+		 ORDER BY round DESC, created_at DESC LIMIT 1`, negotiationID,
+	)
+
+	var o NegotiationOffer
+	var createdAt string
+	err := row.Scan(&o.ID, &o.NegotiationID, &o.Round, &o.FromParty, &o.OfferType, &o.Metadata, &o.PreviousTx, &o.AuditTxID, &o.UserID, &createdAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying last offer: %w", err)
+	}
+	o.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	return &o, nil
+}
+
 // FindOfferByAuditTx checks if an offer with the given audit_tx_id exists.
 func FindOfferByAuditTx(db *sql.DB, auditTxID uint64) (*NegotiationOffer, error) {
 	row := db.QueryRow(

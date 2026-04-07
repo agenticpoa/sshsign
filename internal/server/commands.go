@@ -947,6 +947,17 @@ func handleLogOffer(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
+	// Turn validation: parties must alternate
+	lastOffer, err := storage.GetLastOffer(sc.DB, negotiationID)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("checking turn order: %v", err)})
+		return
+	}
+	if lastOffer != nil && lastOffer.FromParty == fromParty {
+		writeJSON(sess, errorResponse{Error: "not your turn"})
+		return
+	}
+
 	// If previous_tx > 0, verify it exists
 	if previousTx > 0 {
 		prev, err := storage.FindOfferByAuditTx(sc.DB, previousTx)
