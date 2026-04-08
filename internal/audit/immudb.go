@@ -13,6 +13,7 @@ import (
 // ImmuDBLogger is the production audit logger backed by immudb.
 type ImmuDBLogger struct {
 	client  immudb.ImmuClient
+	cfg     ImmuDBConfig
 	healthy atomic.Bool
 	mu      sync.Mutex
 	txSeq   atomic.Uint64
@@ -44,7 +45,7 @@ func NewImmuDBLogger(cfg ImmuDBConfig) (*ImmuDBLogger, error) {
 		return nil, fmt.Errorf("opening immudb session: %w", err)
 	}
 
-	l := &ImmuDBLogger{client: client}
+	l := &ImmuDBLogger{client: client, cfg: cfg}
 	l.healthy.Store(true)
 
 	go l.healthCheckLoop()
@@ -127,12 +128,41 @@ func (l *ImmuDBLogger) healthCheckLoop() {
 		cancel()
 
 		wasHealthy := l.healthy.Load()
-		l.healthy.Store(err == nil)
 
-		if wasHealthy && err != nil {
-			fmt.Printf("immudb health check failed: %v\n", err)
-		} else if !wasHealthy && err == nil {
-			fmt.Println("immudb health check recovered")
+		if err != nil {
+			l.healthy.Store(false)
+			if wasHealthy {
+				fmt.Printf("immudb health check failed: %v\n", err)
+			}
+			// Try to reconnect
+			l.reconnect()
+		} else {
+			l.healthy.Store(true)
+			if !wasHealthy {
+				fmt.Println("immudb connection recovered")
+			}
 		}
 	}
+}
+
+func (l *ImmuDBLogger) reconnect() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	// Close existing session (ignore errors, it's likely already dead)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	l.client.CloseSession(ctx)
+	cancel()
+
+	// Reopen session
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := l.client.OpenSession(ctx, []byte(l.cfg.Username), []byte(l.cfg.Password), l.cfg.Database)
+	if err != nil {
+		return
+	}
+
+	l.healthy.Store(true)
+	fmt.Println("immudb session reconnected")
 }
