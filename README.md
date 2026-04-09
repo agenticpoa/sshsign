@@ -30,6 +30,10 @@ ssh sshsign.dev
 1. Install the CLI:
 
 ```bash
+# Homebrew
+brew install agenticpoa/tap/sshsign
+
+# Or Go install
 go install github.com/agenticpoa/sshsign/cmd/sshsign@latest
 ```
 
