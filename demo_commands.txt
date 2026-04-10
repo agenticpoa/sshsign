@@ -1,0 +1,19 @@
+# ──────────────────────────────────────────────
+# APOA Demo: AI Negotiates, Human Signs
+# ──────────────────────────────────────────────
+
+# Step 1: Founder delegates authority to an AI agent
+# "Negotiate SAFEs between $6M-$15M cap, 15%+ discount, pro-rata required"
+ssh sshsign.dev create-key --scope safe-agreement --tier cosign --require-signature --constraints '{"valuation_cap": {"min": 6000000, "max": 15000000}, "discount_rate": {"min": 0.15}, "pro_rata": {"required": true}}'
+
+# Step 2: Two AI agents negotiate a SAFE (replace KEY_ID)
+cd ~/Projects/go_projects/negotiate && python negotiate.py --founder-token tokens/founder.jwt --investor-token tokens/investor.jwt --founder-pubkey keys/founder_public.pem --investor-pubkey keys/investor_public.pem --sshsign-host sshsign.dev --signing-key-id KEY_ID --founder-name "Juan Figuera" --founder-title "CEO" --poll
+
+# Step 3: Open the approval URL in your browser
+# Draw your signature and click "Sign & Approve"
+
+# Step 4: Verify the deal is done (replace PENDING_ID)
+ssh sshsign.dev get-envelope --id PENDING_ID | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps({k:v for k,v in d.items() if k!='envelope'}, indent=2))"
+
+# Step 5: Test guardrails - try terms outside authority (replace KEY_ID)
+echo '{}' | ssh sshsign.dev sign --type safe-agreement --key-id KEY_ID --metadata '{"valuation_cap": 3000000, "discount_rate": 0.10, "pro_rata": false}'

@@ -32,3 +32,7 @@ Thumbs.db
 
 # GoReleaser
 /dist/
+
+# Session notes
+CLAUDE_CODE_*.md
+sshsign-session-summary.md
