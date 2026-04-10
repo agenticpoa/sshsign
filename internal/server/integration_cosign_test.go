@@ -98,8 +98,8 @@ func TestCosignFlow_ApproveProducesSignature(t *testing.T) {
 		t.Fatalf("expected 1 pending signature, got %d", len(pendingList))
 	}
 
-	// Approve
-	approveOutput, _ := sshClient(t, ts.addr, signer, "approve --id "+pendingResp.PendingID)
+	// Approve (--confirm acknowledges ESIGN disclosure)
+	approveOutput, _ := sshClient(t, ts.addr, signer, "approve --id "+pendingResp.PendingID+" --confirm")
 
 	var approveResp struct {
 		Signature string `json:"signature"`
@@ -181,8 +181,8 @@ func TestCosignFlow_ApproveAfterKeyRevoke(t *testing.T) {
 	// Revoke the signing key
 	storage.RevokeSigningKey(ts.db.DB, keyID)
 
-	// Try to approve - should fail
-	approveOutput, _ := sshClient(t, ts.addr, signer, "approve --id "+pendingResp.PendingID)
+	// Try to approve - should fail (key was revoked)
+	approveOutput, _ := sshClient(t, ts.addr, signer, "approve --id "+pendingResp.PendingID+" --confirm")
 
 	var resp struct {
 		Error string `json:"error"`
@@ -213,7 +213,7 @@ func TestCosignFlow_ApproveByWrongUser(t *testing.T) {
 	signerB, _ := generateTestSSHKey(t)
 	sshClient(t, ts.addr, signerB, "") // create user B
 
-	approveOutput, _ := sshClient(t, ts.addr, signerB, "approve --id "+pendingResp.PendingID)
+	approveOutput, _ := sshClient(t, ts.addr, signerB, "approve --id "+pendingResp.PendingID+" --confirm")
 
 	var resp struct {
 		Error string `json:"error"`

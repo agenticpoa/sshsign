@@ -112,19 +112,23 @@ func approvalPage(ps *storage.PendingSignature, auth *storage.Authorization) str
     <div class="constraints">%s</div>
 
     <div class="esign-disclosure">
-      By checking the box and drawing your signature below, you are signing
-      this document electronically. You agree that your electronic signature
-      is the legal equivalent of your manual signature on this document,
-      pursuant to the U.S. Electronic Signatures in Global and National
-      Commerce Act (ESIGN, 15 U.S.C. &sect; 7001 et seq.) and applicable
-      state laws. You consent to conduct this transaction electronically
-      and acknowledge that you can withdraw this consent at any time before
-      signing by closing this page.
+      <strong>What you're signing</strong><br><br>
+      An AI agent negotiated these terms on your behalf, within the boundaries
+      you authorized. Please review the agreed terms and your authorized range
+      above before signing.<br><br>
+      By drawing your signature below, you confirm:<br>
+      &bull; You delegated negotiation authority with the constraints shown above<br>
+      &bull; You have reviewed and approve the final terms<br>
+      &bull; Your drawn signature is legally binding, equivalent to a handwritten signature<br>
+      &bull; You may close this page to cancel at any time before signing<br><br>
+      Your signature will be sealed into a tamper-evident record with your
+      identity, IP address, and timestamp. This constitutes an electronic
+      signature under the ESIGN Act (15 U.S.C. &sect; 7001).
     </div>
 
     <label class="consent">
       <input type="checkbox" id="consent">
-      I agree to the above disclosure and consent to sign electronically
+      I have read the above and consent to sign electronically
     </label>
 
     <div class="section-label">Your Signature</div>

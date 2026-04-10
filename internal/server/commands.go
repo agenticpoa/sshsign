@@ -670,10 +670,16 @@ func handlePending(sess ssh.Session, sc *SessionContext) {
 // handleApprove approves a pending signature, re-validates authorization, and signs.
 func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 	var pendingID string
+	var confirmed bool
 	for i := 0; i < len(args); i++ {
-		if args[i] == "--id" && i+1 < len(args) {
-			pendingID = args[i+1]
-			i++
+		switch args[i] {
+		case "--id":
+			if i+1 < len(args) {
+				pendingID = args[i+1]
+				i++
+			}
+		case "--confirm":
+			confirmed = true
 		}
 	}
 
@@ -733,6 +739,21 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 			writeJSON(sess, errorResponse{Error: fmt.Sprintf("this approval requires a handwritten signature: %s", url)})
 			return
 		}
+	}
+
+	// Require explicit consent for CLI approvals
+	if !confirmed {
+		writeJSON(sess, map[string]any{
+			"consent_required": true,
+			"pending_id":       ps.ID,
+			"doc_type":         ps.DocType,
+			"metadata":         ps.Metadata,
+			"disclosure": "By approving, you confirm: (1) you have reviewed the terms, " +
+				"(2) your approval is legally binding as an electronic signature under the ESIGN Act " +
+				"(15 U.S.C. 7001), and (3) a tamper-evident record will be created. " +
+				"Re-run with --confirm to approve.",
+		})
+		return
 	}
 
 	// Audit logging is synchronous: if unavailable, signing fails
