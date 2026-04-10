@@ -868,6 +868,74 @@ func handleGetEnvelope(sess ssh.Session, sc *SessionContext, args []string) {
 	writeJSON(sess, resp)
 }
 
+// handleSession processes: ssh host session --id session_xxx
+// Returns the status of all pending signatures in a signing session.
+func handleSession(sess ssh.Session, sc *SessionContext, args []string) {
+	var sessionID string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--id" && i+1 < len(args) {
+			sessionID = args[i+1]
+			i++
+		}
+	}
+
+	if sessionID == "" {
+		writeJSON(sess, errorResponse{Error: "missing --id"})
+		return
+	}
+
+	pendings, err := storage.ListSessionPendings(sc.DB, sessionID)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("querying session: %v", err)})
+		return
+	}
+
+	if len(pendings) == 0 {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("session %s not found", sessionID)})
+		return
+	}
+
+	type signerInfo struct {
+		PendingID string `json:"pending_id"`
+		Status    string `json:"status"`
+		KeyID     string `json:"key_id"`
+		Signature string `json:"signature,omitempty"`
+	}
+
+	var signers []signerInfo
+	allApproved := true
+	anyDenied := false
+
+	for _, ps := range pendings {
+		si := signerInfo{
+			PendingID: ps.ID,
+			Status:    ps.Status,
+			KeyID:     ps.SigningKeyID,
+			Signature: ps.Signature,
+		}
+		signers = append(signers, si)
+		if ps.Status != "approved" {
+			allApproved = false
+		}
+		if ps.Status == "denied" {
+			anyDenied = true
+		}
+	}
+
+	sessionStatus := "pending"
+	if allApproved {
+		sessionStatus = "complete"
+	} else if anyDenied {
+		sessionStatus = "failed"
+	}
+
+	writeJSON(sess, map[string]any{
+		"session_id": sessionID,
+		"status":     sessionStatus,
+		"signers":    signers,
+	})
+}
+
 func handleDeny(sess ssh.Session, sc *SessionContext, args []string) {
 	var pendingID string
 	for i := 0; i < len(args); i++ {

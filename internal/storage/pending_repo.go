@@ -109,6 +109,29 @@ func ListPendingSignatures(db *sql.DB, principalID string) ([]PendingSignature, 
 	return results, rows.Err()
 }
 
+// ListSessionPendings returns all pending signatures for a signing session.
+func ListSessionPendings(db *sql.DB, sessionID string) ([]PendingSignature, error) {
+	rows, err := db.Query(
+		`SELECT id, signing_key_id, auth_token_id, requester_id, doc_type, payload_hash, metadata, status, approval_token, signing_session_id, signature, created_at, resolved_at, resolved_by
+		 FROM pending_signatures WHERE signing_session_id = ?
+		 ORDER BY created_at`, sessionID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying session pendings: %w", err)
+	}
+	defer rows.Close()
+
+	var results []PendingSignature
+	for rows.Next() {
+		ps, err := scanPendingRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, *ps)
+	}
+	return results, rows.Err()
+}
+
 // ResolvePendingSignature marks a pending signature as approved or denied.
 // If sig is non-empty, it is persisted so callers can retrieve it later.
 func ResolvePendingSignature(db *sql.DB, id, status, resolvedBy, sig string) error {

@@ -75,6 +75,8 @@ func CommandHandler(sess ssh.Session, sc *SessionContext) {
 		handleApprove(sess, sc, cmd[1:])
 	case "deny":
 		handleDeny(sess, sc, cmd[1:])
+	case "session":
+		handleSession(sess, sc, cmd[1:])
 	case "log-offer":
 		handleLogOffer(sess, sc, cmd[1:])
 	case "history":
