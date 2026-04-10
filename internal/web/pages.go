@@ -70,6 +70,7 @@ func approvalPage(ps *storage.PendingSignature, auth *storage.Authorization) str
   .mono { font-family: monospace; font-size: 12px; }
   .constraints { font-size: 13px; color: #8b949e; margin-bottom: 20px; }
   .constraint { padding: 2px 0; }
+  .esign-disclosure { font-size: 12px; color: #8b949e; line-height: 1.5; margin-bottom: 12px; padding: 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; }
   .consent { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; font-size: 14px; color: #8b949e; cursor: pointer; }
   .consent input { width: 16px; height: 16px; cursor: pointer; }
   .canvas-wrap { background: #fff; border-radius: 8px; margin-bottom: 16px; position: relative; overflow: hidden; }
@@ -110,9 +111,20 @@ func approvalPage(ps *storage.PendingSignature, auth *storage.Authorization) str
     <div class="section-label">Your Authorized Range</div>
     <div class="constraints">%s</div>
 
+    <div class="esign-disclosure">
+      By checking the box and drawing your signature below, you are signing
+      this document electronically. You agree that your electronic signature
+      is the legal equivalent of your manual signature on this document,
+      pursuant to the U.S. Electronic Signatures in Global and National
+      Commerce Act (ESIGN, 15 U.S.C. &sect; 7001 et seq.) and applicable
+      state laws. You consent to conduct this transaction electronically
+      and acknowledge that you can withdraw this consent at any time before
+      signing by closing this page.
+    </div>
+
     <label class="consent">
       <input type="checkbox" id="consent">
-      I confirm these terms and consent to sign electronically
+      I agree to the above disclosure and consent to sign electronically
     </label>
 
     <div class="section-label">Your Signature</div>

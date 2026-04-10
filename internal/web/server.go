@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -29,7 +31,7 @@ func New(addr string, db *sql.DB, kek []byte) *Server {
 
 	s.httpServer = &http.Server{
 		Addr:         addr,
-		Handler:      securityHeaders(mux),
+		Handler:      rateLimit(securityHeaders(mux)),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -53,6 +55,62 @@ func (s *Server) ListenAndServeTLS(certFile, keyFile string) error {
 // Shutdown gracefully shuts down the HTTP server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
+}
+
+// rateLimit limits requests per IP: 30 requests per minute per IP.
+func rateLimit(next http.Handler) http.Handler {
+	type visitor struct {
+		count    int
+		resetAt  time.Time
+	}
+	var mu sync.Mutex
+	visitors := make(map[string]*visitor)
+
+	// Clean up stale entries every 5 minutes
+	go func() {
+		for range time.Tick(5 * time.Minute) {
+			mu.Lock()
+			now := time.Now()
+			for ip, v := range visitors {
+				if now.After(v.resetAt) {
+					delete(visitors, ip)
+				}
+			}
+			mu.Unlock()
+		}
+	}()
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip rate limiting for health checks
+		if r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		ip := r.RemoteAddr
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if parts := strings.SplitN(xff, ",", 2); len(parts) > 0 {
+				ip = strings.TrimSpace(parts[0])
+			}
+		}
+
+		mu.Lock()
+		v, ok := visitors[ip]
+		if !ok || time.Now().After(v.resetAt) {
+			v = &visitor{count: 0, resetAt: time.Now().Add(1 * time.Minute)}
+			visitors[ip] = v
+		}
+		v.count++
+		count := v.count
+		mu.Unlock()
+
+		if count > 30 {
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func securityHeaders(next http.Handler) http.Handler {

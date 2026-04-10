@@ -18,7 +18,10 @@ import (
 
 var pendingIDPattern = regexp.MustCompile(`^pnd_[0-9a-f]{12}$`)
 
-const maxImageSize = 500 * 1024 // 500KB
+const (
+	maxImageSize       = 500 * 1024      // 500KB
+	approvalTokenTTL   = 15 * time.Minute // approval URLs expire after 15 minutes
+)
 
 // handleGetApproval renders the signature capture page.
 func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +41,11 @@ func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 
 	if ps.ApprovalToken == "" || ps.ApprovalToken != token {
 		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	if time.Since(ps.CreatedAt) > approvalTokenTTL {
+		http.Error(w, "this approval link has expired", http.StatusGone)
 		return
 	}
 
@@ -84,6 +92,11 @@ func (s *Server) handlePostApproval(w http.ResponseWriter, r *http.Request) {
 
 	if ps.ApprovalToken == "" || ps.ApprovalToken != token {
 		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		return
+	}
+
+	if time.Since(ps.CreatedAt) > approvalTokenTTL {
+		http.Error(w, `{"error":"approval link expired"}`, http.StatusGone)
 		return
 	}
 
