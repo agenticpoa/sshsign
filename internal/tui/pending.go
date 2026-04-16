@@ -340,7 +340,14 @@ func (m Model) viewPendingDetail() string {
 	if auth != nil && auth.RequireSignature {
 		b.WriteString(m.s.Error.Render("  ⚠ Requires handwritten signature"))
 		b.WriteString("\n")
-		b.WriteString(m.s.Dim.Render("  Open the approval URL (returned in the sign response) in your browser."))
+		b.WriteString(m.s.Dim.Render("  Open this URL in your browser:"))
+		b.WriteString("\n")
+		if ps.ApprovalToken != "" {
+			url := fmt.Sprintf("https://sshsign.dev/approve/%s?token=%s", ps.ID, ps.ApprovalToken)
+			b.WriteString(m.s.Info.Render("  " + url))
+		} else {
+			b.WriteString(m.s.Dim.Render("  (no approval token recorded for this pending)"))
+		}
 		b.WriteString("\n\n")
 	}
 
