@@ -15,6 +15,7 @@ type welcomeMenuItem int
 const (
 	menuCreateKey welcomeMenuItem = iota
 	menuManageKeys
+	menuPendingApprovals
 	menuAuthSetup
 	menuAuditLog
 	menuLinkKey
@@ -36,7 +37,7 @@ func newWelcomeModel(user *storage.User, userKey *storage.UserKey, isNewUser boo
 	if isNewUser {
 		items = []welcomeMenuItem{menuCreateKey, menuLinkKey, menuExit}
 	} else {
-		items = []welcomeMenuItem{menuCreateKey, menuManageKeys, menuAuditLog, menuLinkKey, menuExit}
+		items = []welcomeMenuItem{menuCreateKey, menuManageKeys, menuPendingApprovals, menuAuditLog, menuLinkKey, menuExit}
 	}
 	return welcomeModel{
 		user:      user,
@@ -52,6 +53,8 @@ func menuLabel(item welcomeMenuItem) string {
 		return "New signing key"
 	case menuManageKeys:
 		return "Manage keys"
+	case menuPendingApprovals:
+		return "Pending approvals"
 	case menuAuthSetup:
 		return "Add authorization"
 	case menuAuditLog:
@@ -89,6 +92,10 @@ func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case menuManageKeys:
 				m.manageKeys = newManageKeysModel(m.db, m.user)
 				m.screen = screenManageKeys
+				return m, nil
+			case menuPendingApprovals:
+				m.pending = newPendingApprovalsModel(m.db, m.user)
+				m.screen = screenPendingApprovals
 				return m, nil
 			case menuAuthSetup:
 				m.authSetup = newAuthSetupModel(m.db, m.user, m.r)
@@ -201,6 +208,13 @@ func (m Model) viewWelcome() string {
 			b.WriteString(s.InfoLabel.Render("  Signs   "))
 			b.WriteString(s.Info.Render(fmt.Sprintf("%d active, %d revoked", active, revoked)))
 			b.WriteString("\n")
+
+			pending, _ := storage.ListPendingSignatures(m.db, m.user.UserID)
+			if len(pending) > 0 {
+				b.WriteString(s.InfoLabel.Render("  Pending "))
+				b.WriteString(s.Selected.Render(fmt.Sprintf("%d awaiting approval", len(pending))))
+				b.WriteString("\n")
+			}
 		}
 	}
 

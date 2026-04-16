@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/agenticpoa/sshsign/internal/audit"
 	"github.com/agenticpoa/sshsign/internal/storage"
 )
 
@@ -17,19 +18,21 @@ const (
 	screenManageKeys
 	screenAuthSetup
 	screenAuditLog
+	screenPendingApprovals
 )
 
 type Model struct {
-	db        *sql.DB
-	kek       []byte
-	user      *storage.User
-	userKey   *storage.UserKey
-	isNewUser bool
-	screen    screen
-	width     int
-	height    int
-	r         *lipgloss.Renderer
-	s         Styles
+	db          *sql.DB
+	kek         []byte
+	auditLogger audit.Logger
+	user        *storage.User
+	userKey     *storage.UserKey
+	isNewUser   bool
+	screen      screen
+	width       int
+	height      int
+	r           *lipgloss.Renderer
+	s           Styles
 
 	// Sub-models
 	linkKey    linkKeyModel
@@ -37,23 +40,25 @@ type Model struct {
 	manageKeys manageKeysModel
 	authSetup  authSetupModel
 	auditLog   auditLogModel
+	pending    pendingApprovalsModel
 }
 
 func NewModel(db *sql.DB, kek []byte, user *storage.User, userKey *storage.UserKey, isNewUser bool) Model {
-	return NewModelWithRenderer(db, kek, user, userKey, isNewUser, lipgloss.DefaultRenderer())
+	return NewModelWithRenderer(db, kek, nil, user, userKey, isNewUser, lipgloss.DefaultRenderer())
 }
 
-func NewModelWithRenderer(db *sql.DB, kek []byte, user *storage.User, userKey *storage.UserKey, isNewUser bool, r *lipgloss.Renderer) Model {
+func NewModelWithRenderer(db *sql.DB, kek []byte, auditLogger audit.Logger, user *storage.User, userKey *storage.UserKey, isNewUser bool, r *lipgloss.Renderer) Model {
 	return Model{
-		db:        db,
-		kek:       kek,
-		user:      user,
-		userKey:   userKey,
-		isNewUser: isNewUser,
-		screen:    screenWelcome,
-		r:         r,
-		s:         NewStyles(r),
-		welcome:   newWelcomeModel(user, userKey, isNewUser),
+		db:          db,
+		kek:         kek,
+		auditLogger: auditLogger,
+		user:        user,
+		userKey:     userKey,
+		isNewUser:   isNewUser,
+		screen:      screenWelcome,
+		r:           r,
+		s:           NewStyles(r),
+		welcome:     newWelcomeModel(user, userKey, isNewUser),
 	}
 }
 
@@ -85,6 +90,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAuthSetup(msg)
 	case screenAuditLog:
 		return m.updateAuditLog(msg)
+	case screenPendingApprovals:
+		return m.updatePendingApprovals(msg)
 	}
 
 	return m, nil
@@ -102,6 +109,8 @@ func (m Model) View() string {
 		return m.viewAuthSetup()
 	case screenAuditLog:
 		return m.viewAuditLog()
+	case screenPendingApprovals:
+		return m.viewPendingApprovals()
 	default:
 		return "Unknown screen"
 	}

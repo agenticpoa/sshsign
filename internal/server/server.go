@@ -29,7 +29,7 @@ func New(cfg config.Config, db *sql.DB, kek []byte, auditLog audit.Logger) (*ssh
 		wish.WithPublicKeyAuth(PublicKeyHandler()),
 		wish.WithMiddleware(
 			// Bubbletea middleware runs for PTY sessions, ensure ANSI256 colors
-			bubbletea.MiddlewareWithColorProfile(tuiHandler(db, kek), termenv.ANSI256),
+			bubbletea.MiddlewareWithColorProfile(tuiHandler(db, kek, auditLog), termenv.ANSI256),
 			// Session handler runs first: user lookup/create, command routing
 			SessionHandler(db, kek, rl, auditLog, cfg.HTTPDomain),
 		),
@@ -41,15 +41,15 @@ func New(cfg config.Config, db *sql.DB, kek []byte, auditLog audit.Logger) (*ssh
 	return srv, nil
 }
 
-func tuiHandler(db *sql.DB, kek []byte) bubbletea.Handler {
+func tuiHandler(db *sql.DB, kek []byte, auditLog audit.Logger) bubbletea.Handler {
 	return func(sess ssh.Session) (tea.Model, []tea.ProgramOption) {
 		renderer := bubbletea.MakeRenderer(sess)
 		sc := SessionContextFromContext(sess.Context())
 		if sc == nil {
-			return appTUI.NewModelWithRenderer(db, kek, nil, nil, true, renderer), []tea.ProgramOption{tea.WithAltScreen()}
+			return appTUI.NewModelWithRenderer(db, kek, auditLog, nil, nil, true, renderer), []tea.ProgramOption{tea.WithAltScreen()}
 		}
 
-		model := appTUI.NewModelWithRenderer(db, kek, sc.User, sc.UserKey, sc.IsNewUser, renderer)
+		model := appTUI.NewModelWithRenderer(db, kek, auditLog, sc.User, sc.UserKey, sc.IsNewUser, renderer)
 		return model, []tea.ProgramOption{tea.WithAltScreen()}
 	}
 }
