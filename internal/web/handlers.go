@@ -19,8 +19,8 @@ import (
 var pendingIDPattern = regexp.MustCompile(`^pnd_[0-9a-f]{12}$`)
 
 const (
-	maxImageSize       = 500 * 1024      // 500KB
-	approvalTokenTTL   = 15 * time.Minute // approval URLs expire after 15 minutes
+	maxImageSize     = 500 * 1024    // 500KB
+	approvalTokenTTL = 24 * time.Hour // approval URLs expire after 24 hours
 )
 
 // handleGetApproval renders the signature capture page.
