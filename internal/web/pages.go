@@ -251,6 +251,13 @@ async function submitSignature() {
     document.getElementById('review').style.display = 'none';
     document.getElementById('done').style.display = 'block';
     document.getElementById('envelope-hash').textContent = 'Envelope: ' + data.envelope_hash;
+
+    // Redirect to callback URL if provided (e.g. Telegram deep link)
+    const params = new URLSearchParams(window.location.search);
+    const callback = params.get('callback');
+    if (callback) {
+      setTimeout(() => { window.location.href = callback; }, 1500);
+    }
   } catch (err) {
     document.getElementById('status').style.display = 'none';
     document.getElementById('error').style.display = 'block';
