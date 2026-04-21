@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/ssh"
@@ -294,21 +295,54 @@ func handleAuditSession(sess ssh.Session, sc *SessionContext, args []string) {
 // `--key value` and boolean `--flag` (treated as "--flag=true"). Returns
 // a map with hyphen-prefix stripped. Mirrors the convention used by
 // sign/verify/etc. in commands.go; kept local to sessions for isolation.
+//
+// Multi-line PEM values: SSH splits argv on whitespace including newlines,
+// so an "-----BEGIN PUBLIC KEY-----\n<base64>\n-----END PUBLIC KEY-----"
+// arrives as several separate args. When we detect an arg that starts
+// with "-----BEGIN", we rejoin subsequent non-flag args with newlines
+// until we see the matching "-----END" line. Mirrors the same concession
+// parseJSONArg (commands.go) makes for JSON arguments with spaces.
 func parseSessionFlags(args []string) (map[string]string, error) {
+	// isFlag — a real "--foo" flag, NOT a PEM delimiter like "-----BEGIN"
+	// that also happens to start with "--". The discriminator: real flags
+	// have a letter or digit right after the two dashes; PEM markers have
+	// another dash.
+	isFlag := func(s string) bool {
+		return len(s) > 2 && s[:2] == "--" && s[2] != '-'
+	}
+
 	out := make(map[string]string)
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		if len(a) < 3 || a[:2] != "--" {
+		if !isFlag(a) {
 			return nil, fmt.Errorf("unexpected argument: %q", a)
 		}
 		key := a[2:]
 		// Boolean flag (next arg is another flag or end of list)
-		if i+1 >= len(args) || (len(args[i+1]) >= 2 && args[i+1][:2] == "--") {
+		if i+1 >= len(args) || isFlag(args[i+1]) {
 			out[key] = "true"
 			continue
 		}
-		out[key] = args[i+1]
+		val := args[i+1]
 		i++
+
+		if strings.HasPrefix(val, "-----BEGIN") {
+			// Keep joining until a real `--flag` appears or args are
+			// exhausted. PEM end markers themselves are split across
+			// multiple args ("-----END", "PUBLIC", "KEY-----") so
+			// short-circuiting on "-----END" leaves tail args dangling
+			// and trips the outer loop's bare-arg check.
+			parts := []string{val}
+			for i+1 < len(args) {
+				if isFlag(args[i+1]) {
+					break
+				}
+				parts = append(parts, args[i+1])
+				i++
+			}
+			val = strings.Join(parts, "\n")
+		}
+		out[key] = val
 	}
 	return out, nil
 }
