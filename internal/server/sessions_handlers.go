@@ -302,6 +302,41 @@ func handleAuditSession(sess ssh.Session, sc *SessionContext, args []string) {
 // with "-----BEGIN", we rejoin subsequent non-flag args with newlines
 // until we see the matching "-----END" line. Mirrors the same concession
 // parseJSONArg (commands.go) makes for JSON arguments with spaces.
+// joinPEMParts reconstructs a canonical PEM block from SSH-argv fragments.
+// A marker line ("-----BEGIN PUBLIC KEY-----") arrives as three parts:
+// the leading "-----BEGIN", a word like "PUBLIC" that has no dashes,
+// and "KEY-----". The rule: a marker line starts at an arg containing
+// "-----" and ends at the *next* arg that contains "-----"; any word
+// fragments between are part of the same line. Args outside marker
+// runs are base64 data, one arg per line.
+func joinPEMParts(parts []string) string {
+	var lines []string
+	i := 0
+	for i < len(parts) {
+		if !strings.Contains(parts[i], "-----") {
+			lines = append(lines, parts[i])
+			i++
+			continue
+		}
+		// Marker-line run: scan forward until we find the matching
+		// "-----" arg that closes this header/footer.
+		j := i + 1
+		for j < len(parts) && !strings.Contains(parts[j], "-----") {
+			j++
+		}
+		if j < len(parts) {
+			lines = append(lines, strings.Join(parts[i:j+1], " "))
+			i = j + 1
+		} else {
+			// Unclosed marker — emit what we have; downstream PEM
+			// decode will fail with a clearer error than argv noise.
+			lines = append(lines, strings.Join(parts[i:], " "))
+			i = len(parts)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func parseSessionFlags(args []string) (map[string]string, error) {
 	// isFlag — a real "--foo" flag, NOT a PEM delimiter like "-----BEGIN"
 	// that also happens to start with "--". The discriminator: real flags
@@ -340,7 +375,14 @@ func parseSessionFlags(args []string) (map[string]string, error) {
 				parts = append(parts, args[i+1])
 				i++
 			}
-			val = strings.Join(parts, "\n")
+			// Reconstruct canonical PEM: header/footer lines are single
+			// lines with space-separated tokens (`-----BEGIN PUBLIC
+			// KEY-----`); base64 data is its own line. Detect marker-line
+			// fragments by presence of "-----" and group adjacent ones
+			// together with spaces. Go's pem.Decode rejects the naive
+			// newline-join because `-----BEGIN\nPUBLIC\nKEY-----` is not
+			// a valid PEM header.
+			val = joinPEMParts(parts)
 		}
 		out[key] = val
 	}

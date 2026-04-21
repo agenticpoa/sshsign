@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/pem"
 	"strings"
 	"testing"
 )
@@ -55,16 +56,42 @@ func TestParseSessionFlags_MultiLinePEMRejoined(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	pem := out["apoa-pubkey"]
-	if !strings.HasPrefix(pem, "-----BEGIN") {
-		t.Fatalf("expected PEM start, got: %q", pem)
+	got := out["apoa-pubkey"]
+	// Canonical PEM: single-line header + base64 data + single-line footer
+	if !strings.HasPrefix(got, "-----BEGIN PUBLIC KEY-----") {
+		t.Fatalf("expected canonical PEM header, got: %q", got)
 	}
-	if !strings.HasSuffix(pem, "-----END\nPUBLIC\nKEY-----") &&
-		!strings.HasSuffix(pem, "KEY-----") {
-		t.Fatalf("expected PEM end, got: %q", pem)
+	if !strings.HasSuffix(got, "-----END PUBLIC KEY-----") {
+		t.Fatalf("expected canonical PEM footer, got: %q", got)
 	}
 	if out["session-id"] != "neg_1" || out["role"] != "founder" {
 		t.Fatalf("sibling flags mangled: %#v", out)
+	}
+}
+
+func TestParseSessionFlags_PEMIsGoParseable(t *testing.T) {
+	// End-to-end validation: the rejoined PEM must decode cleanly with
+	// Go's pem package, otherwise signature-verify paths blow up.
+	args := []string{
+		"--apoa-pubkey",
+		"-----BEGIN",
+		"PUBLIC",
+		"KEY-----",
+		"MCowBQYDK2VwAyEAcdSPrRI/ac1w5FdQHFZxoE5asT18DNckUwkRMIrMKmU=",
+		"-----END",
+		"PUBLIC",
+		"KEY-----",
+	}
+	out, err := parseSessionFlags(args)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	block, _ := pem.Decode([]byte(out["apoa-pubkey"]))
+	if block == nil {
+		t.Fatalf("pem.Decode failed on: %q", out["apoa-pubkey"])
+	}
+	if block.Type != "PUBLIC KEY" {
+		t.Fatalf("expected type PUBLIC KEY, got %q", block.Type)
 	}
 }
 
