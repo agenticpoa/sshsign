@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -262,6 +263,74 @@ func (r *Repo) GetByID(id string) (*Session, error) {
 		return nil, err
 	}
 	return sess, tx.Commit()
+}
+
+// ──────────────────────────────────────────────────────────────
+// Rate limiter for get-session (in-memory sliding window per user).
+// ──────────────────────────────────────────────────────────────
+
+// GetSessionRateLimiter tracks per-user get-session call counts in a
+// sliding 1-hour window. Shared across all Repo instances via the
+// server's SessionContext. Kept separate from Repo so it can be
+// composed at the handler layer (the repo itself doesn't know about
+// callers — it just reads the DB).
+type GetSessionRateLimiter struct {
+	mu      sync.Mutex
+	windows map[string]*userWindow
+	limit   int
+	period  time.Duration
+
+	// Injectable for tests.
+	now func() time.Time
+}
+
+type userWindow struct {
+	timestamps []time.Time
+}
+
+// NewGetSessionRateLimiter returns a limiter capped at
+// MaxGetSessionCallsPerHour per user over a 1-hour sliding window.
+func NewGetSessionRateLimiter() *GetSessionRateLimiter {
+	return &GetSessionRateLimiter{
+		windows: make(map[string]*userWindow),
+		limit:   MaxGetSessionCallsPerHour,
+		period:  time.Hour,
+		now:     time.Now,
+	}
+}
+
+// Allow returns nil if the user is under quota; otherwise ErrRateLimit.
+// Records the current call so repeated callers get incrementally rejected.
+func (l *GetSessionRateLimiter) Allow(userID string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := l.now()
+	cutoff := now.Add(-l.period)
+
+	w, ok := l.windows[userID]
+	if !ok {
+		w = &userWindow{}
+		l.windows[userID] = w
+	}
+
+	// Drop expired timestamps from the head of the window.
+	i := 0
+	for ; i < len(w.timestamps); i++ {
+		if !w.timestamps[i].Before(cutoff) {
+			break
+		}
+	}
+	if i > 0 {
+		w.timestamps = w.timestamps[i:]
+	}
+
+	if len(w.timestamps) >= l.limit {
+		return fmt.Errorf("%w: %d get-session calls in the past %s (max %d)",
+			ErrRateLimit, len(w.timestamps), l.period, l.limit)
+	}
+	w.timestamps = append(w.timestamps, now)
+	return nil
 }
 
 // Members returns all members of a session.

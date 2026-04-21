@@ -9,19 +9,21 @@ import (
 	"github.com/charmbracelet/wish"
 
 	"github.com/agenticpoa/sshsign/internal/audit"
+	"github.com/agenticpoa/sshsign/internal/sessions"
 	"github.com/agenticpoa/sshsign/internal/storage"
 )
 
 // SessionContext holds everything a session needs to operate.
 type SessionContext struct {
-	DB         *sql.DB
-	KEK        []byte
-	User       *storage.User
-	UserKey    *storage.UserKey
-	IsNewUser  bool
-	RateLimits *ServerRateLimits
-	Audit      audit.Logger
-	HTTPDomain string // domain for web approval URLs
+	DB                    *sql.DB
+	KEK                   []byte
+	User                  *storage.User
+	UserKey               *storage.UserKey
+	IsNewUser             bool
+	RateLimits            *ServerRateLimits
+	GetSessionRateLimiter *sessions.GetSessionRateLimiter
+	Audit                 audit.Logger
+	HTTPDomain            string // domain for web approval URLs
 }
 
 // EnsureUser finds or creates a user for the connecting SSH key.
@@ -102,6 +104,10 @@ func CommandHandler(sess ssh.Session, sc *SessionContext) {
 // For PTY sessions, it passes through to the next handler (bubbletea).
 // For non-PTY sessions, it handles commands directly.
 func SessionHandler(db *sql.DB, kek []byte, rl *ServerRateLimits, auditLog audit.Logger, httpDomain string) func(next ssh.Handler) ssh.Handler {
+	// Long-lived, shared across all SSH connections — per-user counters
+	// live inside the limiter and are keyed by sshsign user_id.
+	getSessionLimiter := sessions.NewGetSessionRateLimiter()
+
 	return func(next ssh.Handler) ssh.Handler {
 		return func(sess ssh.Session) {
 			fingerprint := FingerprintFromContext(sess.Context())
@@ -120,14 +126,15 @@ func SessionHandler(db *sql.DB, kek []byte, rl *ServerRateLimits, auditLog audit
 			}
 
 			sc := &SessionContext{
-				DB:         db,
-				KEK:        kek,
-				User:       user,
-				UserKey:    userKey,
-				IsNewUser:  isNew,
-				RateLimits: rl,
-				Audit:      auditLog,
-				HTTPDomain: httpDomain,
+				DB:                    db,
+				KEK:                   kek,
+				User:                  user,
+				UserKey:               userKey,
+				IsNewUser:             isNew,
+				RateLimits:            rl,
+				GetSessionRateLimiter: getSessionLimiter,
+				Audit:                 auditLog,
+				HTTPDomain:            httpDomain,
 			}
 
 			// Store session context for the TUI to access

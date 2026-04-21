@@ -7,7 +7,7 @@
 ssh sshsign.dev create-key --scope safe-agreement --tier cosign --require-signature --constraints '{"valuation_cap": {"min": 6000000, "max": 15000000}, "discount_rate": {"min": 0.15}, "pro_rata": {"required": true}}'
 
 # Step 2: Two AI agents negotiate a SAFE (replace KEY_ID)
-cd ~/Projects/go_projects/negotiate && python negotiate.py --founder-token tokens/founder.jwt --investor-token tokens/investor.jwt --founder-pubkey keys/founder_public.pem --investor-pubkey keys/investor_public.pem --sshsign-host sshsign.dev --signing-key-id KEY_ID --founder-name "Juan Figuera" --founder-title "CEO" --poll
+cd ~/Projects/go_projects/negotiate && python negotiate.py --founder-token tokens/founder.jwt --investor-token tokens/investor.jwt --founder-pubkey keys/founder_public.pem --investor-pubkey keys/investor_public.pem --sshsign-host sshsign.dev --signing-key-id ak_1f967ebf9eb5 --founder-name "Juan Figuera" --founder-title "CEO" --poll
 
 # Step 3: Open the approval URL in your browser
 # Draw your signature and click "Sign & Approve"

@@ -155,11 +155,22 @@ func handleJoinSession(sess ssh.Session, sc *SessionContext, args []string) {
 // handleGetSession: `get-session (--session-code CODE | --session-id ID)`
 // Returns the session record. Membership-gated metadata_member + members
 // list appear only if the caller is a member of the session.
+// Rate-limited per-user (sliding 1-hour window) to prevent code-space
+// enumeration.
 func handleGetSession(sess ssh.Session, sc *SessionContext, args []string) {
 	flags, err := parseSessionFlags(args)
 	if err != nil {
 		writeJSON(sess, errorResponse{Error: err.Error()})
 		return
+	}
+
+	// Rate limit before touching the DB — cheap check, blocks attackers
+	// from amortizing fixed DB latency while iterating codes.
+	if sc.GetSessionRateLimiter != nil {
+		if err := sc.GetSessionRateLimiter.Allow(sc.User.UserID); err != nil {
+			writeJSON(sess, errorResponse{Error: err.Error()})
+			return
+		}
 	}
 
 	repo := sessions.NewRepo(sc.DB)
