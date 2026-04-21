@@ -53,6 +53,7 @@ func Migrate(db *sql.DB) error {
 		`ALTER TABLE pending_signatures ADD COLUMN approval_token TEXT`,
 		`ALTER TABLE pending_signatures ADD COLUMN signing_session_id TEXT`,
 		`ALTER TABLE pending_signatures ADD COLUMN signature TEXT`,
+		`ALTER TABLE signing_sessions ADD COLUMN view_token TEXT`,
 	}
 	for _, m := range columnMigrations {
 		_, err := db.Exec(m)
@@ -164,7 +165,8 @@ CREATE TABLE IF NOT EXISTS signing_sessions (
 	finalized_by       TEXT REFERENCES users(user_id),
 	executed_artifact  TEXT,
 	metadata_public    TEXT NOT NULL DEFAULT '{}',
-	metadata_member    TEXT NOT NULL DEFAULT '{}'
+	metadata_member    TEXT NOT NULL DEFAULT '{}',
+	view_token         TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_signing_sessions_code ON signing_sessions(session_code);

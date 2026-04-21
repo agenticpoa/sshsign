@@ -24,6 +24,7 @@ func New(addr string, db *sql.DB, kek []byte) *Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /approve/{pendingID}", s.handleGetApproval)
 	mux.HandleFunc("POST /approve/{pendingID}", s.handlePostApproval)
+	mux.HandleFunc("GET /audit/{sessionID}", s.handleAuditView)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))

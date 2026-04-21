@@ -61,6 +61,7 @@ type Session struct {
 	ExecutedArtifact  string // URI to signed artifact; empty unless status=completed
 	MetadataPublic    string // visible to anyone with the session_code
 	MetadataMember    string // visible ONLY to members
+	ViewToken         string // shareable read-only audit token; empty until issued
 }
 
 // Member represents one party in a session.

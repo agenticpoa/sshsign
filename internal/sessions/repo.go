@@ -1,7 +1,9 @@
 package sessions
 
 import (
+	cryptoRand "crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -465,12 +467,21 @@ func (r *Repo) Complete(sessionID, actorUserID, executedArtifact string) (*Sessi
 	}
 
 	now := r.now().UTC().Format(time.RFC3339Nano)
+
+	// Issue a fresh view_token at completion time so the creator can
+	// immediately share the audit URL. Regenerable later via
+	// IssueViewToken if the token is leaked.
+	viewToken, err := generateViewToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate view token: %w", err)
+	}
+
 	_, err = tx.Exec(
 		`UPDATE signing_sessions
 		 SET status = 'completed', completed_at = ?, finalized_by = ?,
-		     executed_artifact = ?
+		     executed_artifact = ?, view_token = ?
 		 WHERE session_id = ?`,
-		now, actorUserID, executedArtifact, sessionID,
+		now, actorUserID, executedArtifact, viewToken, sessionID,
 	)
 	if err != nil {
 		return nil, err
@@ -485,6 +496,89 @@ func (r *Repo) Complete(sessionID, actorUserID, executedArtifact string) (*Sessi
 		return nil, err
 	}
 	return r.GetByID(sessionID)
+}
+
+// IssueViewToken rotates the shareable audit view_token. Creator-only.
+// Returns the new token in the returned Session.ViewToken field. The
+// previous token stops working immediately — useful if a token was
+// leaked or shared with someone who shouldn't have access anymore.
+func (r *Repo) IssueViewToken(sessionID, actorUserID string) (*Session, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	sess, err := r.getByIDTx(tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if sess.CreatedBy != actorUserID {
+		return nil, ErrNotCreator
+	}
+	if sess.Status != StatusCompleted {
+		// Pre-completion sessions don't need audit URLs; restrict to
+		// completed to avoid accidental exposure of in-progress state.
+		return nil, fmt.Errorf("%w: view tokens are only issued after completion", ErrInvalidStatus)
+	}
+
+	token, err := generateViewToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate view token: %w", err)
+	}
+
+	_, err = tx.Exec(
+		`UPDATE signing_sessions SET view_token = ? WHERE session_id = ?`,
+		token, sessionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeAudit(tx, sessionID, "view_token_rotated", actorUserID, ""); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r.GetByID(sessionID)
+}
+
+// GetByViewToken fetches a session for public audit rendering. The
+// session_id AND the view_token must match — prevents enumeration of
+// session IDs to discover tokens. Returns ErrNotFound on mismatch (don't
+// leak whether the session exists but the token is wrong).
+func (r *Repo) GetByViewToken(sessionID, viewToken string) (*Session, error) {
+	if sessionID == "" || viewToken == "" {
+		return nil, ErrNotFound
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	sess, err := r.getByIDTx(tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	// Constant-time compare would be strictly more principled, but the
+	// attacker's leverage here is limited: tokens are high-entropy and
+	// rate-limited at the HTTP layer. Standard comparison is fine.
+	if sess.ViewToken == "" || sess.ViewToken != viewToken {
+		return nil, ErrNotFound
+	}
+	return sess, tx.Commit()
+}
+
+// generateViewToken returns a URL-safe random string (22 chars,
+// ~128 bits of entropy).
+func generateViewToken() (string, error) {
+	// 16 random bytes → base64 URL encoded = 22 chars.
+	buf := make([]byte, 16)
+	if _, err := cryptoRand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // Audit returns the append-only transition log for a session.
@@ -519,25 +613,22 @@ func (r *Repo) Audit(sessionID string) ([]AuditEvent, error) {
 
 func (r *Repo) getByIDTx(tx *sql.Tx, id string) (*Session, error) {
 	return scanSessionRow(tx.QueryRow(
-		`SELECT session_id, session_code, created_by, created_at, expires_at,
-		        status, COALESCE(canceled_by, ''), COALESCE(completed_at, ''),
-		        COALESCE(finalized_by, ''), COALESCE(executed_artifact, ''),
-		        metadata_public, metadata_member
-		 FROM signing_sessions WHERE session_id = ?`, id))
+		sessionSelectColumns+` FROM signing_sessions WHERE session_id = ?`, id))
 }
 
 func getByCodeTx(tx *sql.Tx, code string) (*Session, error) {
 	sess, err := scanSessionRow(tx.QueryRow(
-		`SELECT session_id, session_code, created_by, created_at, expires_at,
-		        status, COALESCE(canceled_by, ''), COALESCE(completed_at, ''),
-		        COALESCE(finalized_by, ''), COALESCE(executed_artifact, ''),
-		        metadata_public, metadata_member
-		 FROM signing_sessions WHERE session_code = ?`, code))
+		sessionSelectColumns+` FROM signing_sessions WHERE session_code = ?`, code))
 	if errors.Is(err, ErrNotFound) {
 		return nil, ErrCodeNotFound
 	}
 	return sess, err
 }
+
+const sessionSelectColumns = `SELECT session_id, session_code, created_by, created_at, expires_at,
+       status, COALESCE(canceled_by, ''), COALESCE(completed_at, ''),
+       COALESCE(finalized_by, ''), COALESCE(executed_artifact, ''),
+       metadata_public, metadata_member, COALESCE(view_token, '')`
 
 type rowScanner interface {
 	Scan(dest ...interface{}) error
@@ -551,7 +642,7 @@ func scanSessionRow(row rowScanner) (*Session, error) {
 		&s.SessionID, &s.SessionCode, &s.CreatedBy,
 		&createdAt, &expiresAt, &status,
 		&s.CanceledBy, &completedAt, &s.FinalizedBy, &s.ExecutedArtifact,
-		&s.MetadataPublic, &s.MetadataMember,
+		&s.MetadataPublic, &s.MetadataMember, &s.ViewToken,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
