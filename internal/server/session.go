@@ -81,6 +81,18 @@ func CommandHandler(sess ssh.Session, sc *SessionContext) {
 		handleLogOffer(sess, sc, cmd[1:])
 	case "history":
 		handleHistory(sess, sc, cmd[1:])
+	case "create-session":
+		handleCreateSession(sess, sc, cmd[1:])
+	case "join-session":
+		handleJoinSession(sess, sc, cmd[1:])
+	case "get-session":
+		handleGetSession(sess, sc, cmd[1:])
+	case "cancel-session":
+		handleCancelSession(sess, sc, cmd[1:])
+	case "complete-session":
+		handleCompleteSession(sess, sc, cmd[1:])
+	case "audit-session":
+		handleAuditSession(sess, sc, cmd[1:])
 	default:
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("unknown command '%s'", cmd[0])})
 	}

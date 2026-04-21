@@ -145,4 +145,53 @@ CREATE TABLE IF NOT EXISTS evidence_envelopes (
 	hash        TEXT NOT NULL,
 	created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- signing_sessions: multi-party signing coordination record. A session
+-- groups two or more parties who will jointly sign a document (SAFE,
+-- NDA, employment offer, etc). Deliberately use-case-agnostic — metadata
+-- is opaque JSON. Self-contained — no FKs into pending_signatures (soft
+-- correlation via session_id only) so future extraction to a standalone
+-- service is a clean package move.
+CREATE TABLE IF NOT EXISTS signing_sessions (
+	session_id         TEXT PRIMARY KEY,
+	session_code       TEXT NOT NULL UNIQUE,
+	created_by         TEXT NOT NULL REFERENCES users(user_id),
+	created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+	expires_at         TEXT NOT NULL,
+	status             TEXT NOT NULL DEFAULT 'open',
+	canceled_by        TEXT REFERENCES users(user_id),
+	completed_at       TEXT,
+	finalized_by       TEXT REFERENCES users(user_id),
+	executed_artifact  TEXT,
+	metadata_public    TEXT NOT NULL DEFAULT '{}',
+	metadata_member    TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_signing_sessions_code ON signing_sessions(session_code);
+CREATE INDEX IF NOT EXISTS idx_signing_sessions_status_expires ON signing_sessions(status, expires_at);
+
+CREATE TABLE IF NOT EXISTS signing_session_members (
+	session_id       TEXT NOT NULL REFERENCES signing_sessions(session_id),
+	user_id          TEXT NOT NULL REFERENCES users(user_id),
+	role             TEXT NOT NULL,
+	apoa_pubkey_pem  TEXT NOT NULL,
+	party_did        TEXT NOT NULL DEFAULT '',
+	joined_at        TEXT NOT NULL DEFAULT (datetime('now')),
+	PRIMARY KEY (session_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_members_user ON signing_session_members(user_id);
+
+-- signing_session_audit: append-only log of session state transitions.
+-- Powers the audit-session command and user-facing audit URLs.
+CREATE TABLE IF NOT EXISTS signing_session_audit (
+	id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	session_id  TEXT NOT NULL REFERENCES signing_sessions(session_id),
+	event_type  TEXT NOT NULL,
+	actor_id    TEXT NOT NULL REFERENCES users(user_id),
+	details     TEXT NOT NULL DEFAULT '{}',
+	created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_audit_session ON signing_session_audit(session_id, created_at);
 `
