@@ -14,6 +14,7 @@ ssh sshsign.dev
 - Create Ed25519 signing keys with scoped authorizations and metadata constraints
 - Sign git commits, legal agreements (SAFEs, NDAs), or arbitrary payloads
 - Co-sign approval flow: agents act, humans approve with optional handwritten signature
+- **Multi-party signing sessions**: two or more parties coordinate a joint signing ceremony through a shareable short code. See [Multi-party signing sessions](#multi-party-signing-sessions) below.
 - Negotiation logging with turn enforcement and immutable chain linking
 - Every sign, deny, and revoke is logged to an immutable audit trail (immudb)
 
@@ -130,6 +131,143 @@ https://sshsign.dev/approve/pnd_xxx?token=...
 ```
 
 The approver opens this in a browser, reviews the agreed terms, draws their handwritten signature, and clicks "Sign & Approve". The signature image is sealed into an evidence envelope alongside the document hash, signer identity, IP, and timestamp. The image exists only inside the sealed envelope.
+
+## Multi-party signing sessions
+
+A **signing session** is a shared, discoverable record that two or more parties read from to coordinate a joint signing ceremony. Use it whenever more than one person has to sign the same document after agreeing on terms — SAFEs, NDAs, employment offers, lending round docs, co-authored agreements, anything.
+
+Sessions are deliberately use-case-agnostic. `sshsign` doesn't know what you're signing; it just provides the coordination primitive:
+
+- One party creates a session and gets a short, shareable code (e.g., `INV-7K3X9`)
+- Other parties join using the code; each publishes their APOA public key
+- Cancellation, completion, and the full transition timeline are tracked
+- The final executed artifact URI is recorded and made auditable through a shareable `/audit/<session_id>` URL that preserves privacy (no authorized-range leakage between parties)
+
+### Commands
+
+```bash
+# Create a session (e.g., founder initiating a SAFE negotiation)
+ssh sshsign.dev create-session \
+  --session-id neg_abc123 \
+  --role founder \
+  --apoa-pubkey "$(cat founder_apoa.pub)" \
+  --party-did did:apoa:alice \
+  --metadata-public '{"use_case":"safe","version":1}' \
+  --metadata-member '{"company_name":"Acme","expected_counterparty":"Bay Capital"}'
+# → Returns a session_code like INV-7K3X9
+
+# Another party joins (e.g., investor)
+ssh sshsign.dev join-session \
+  --session-code INV-7K3X9 \
+  --role investor \
+  --apoa-pubkey "$(cat investor_apoa.pub)" \
+  --party-did did:apoa:mark
+
+# Fetch session state (members get metadata_member + party list;
+# non-members see only metadata_public + status)
+ssh sshsign.dev get-session --session-code INV-7K3X9
+
+# Cancel before signing
+ssh sshsign.dev cancel-session --session-id neg_abc123
+
+# Post-signing rescission — distinct terminal state
+ssh sshsign.dev cancel-session --session-id neg_abc123 --rescind
+
+# Complete (creator-only, idempotent). Issues a view_token for the public audit URL.
+ssh sshsign.dev complete-session \
+  --session-id neg_abc123 \
+  --executed-artifact sshsign://artifact/signed.pdf
+
+# Read the append-only transition log (members only)
+ssh sshsign.dev audit-session --session-id neg_abc123
+```
+
+### States and lifecycle
+
+```
+           join-session
+  open ─────────────────► joined
+    │                        │
+    │                        │ complete-session
+    │ cancel-session         ▼
+    ▼                    completed ◄── terminal
+  canceled ◄── terminal
+    ▲
+    │ cancel-session --rescind
+    │ (after first signature, before completion)
+  rescinded_after_sign ◄── terminal
+
+  expired ◄── terminal (24h default TTL on open/joined sessions)
+```
+
+Terminal states are immutable — sessions never transition out of them.
+
+### Public audit view
+
+When a session completes, a `view_token` is issued. Anyone holding `/audit/<session_id>?token=<view_token>` can see:
+
+- Agreed lifecycle timeline (create → join → complete with timestamps)
+- Party roles, user IDs, DIDs
+- SHA-256 fingerprints of each party's APOA public key (integrity-verifiable; keys themselves never exposed)
+- Public metadata (the `--metadata-public` field)
+- The executed artifact URI
+
+What the public audit view does NOT expose:
+- Either party's authorized ranges or constraints (preserves negotiating-position privacy)
+- The member-only metadata (company name, expected counterparty, etc.)
+- Offer-by-offer history (that's per-party private state)
+
+```bash
+# Rotate the view_token if leaked
+ssh sshsign.dev share-audit --session-id neg_abc123
+```
+
+### Minimal example: two parties counter-sign an NDA
+
+The session primitive isn't specific to SAFEs. Here's a bare-bones NDA flow:
+
+```bash
+# Party A creates the session
+CODE=$(ssh sshsign.dev create-session \
+  --session-id nda_acme_bay_2026 \
+  --role party_a \
+  --apoa-pubkey "$(cat alice_apoa.pub)" \
+  --metadata-public '{"use_case":"nda"}' \
+  --metadata-member '{"doc":"Mutual NDA between Acme and Bay Capital"}' \
+  | jq -r .session_code)
+echo "Share this with Party B: $CODE"
+
+# Party B joins
+ssh sshsign.dev join-session \
+  --session-code "$CODE" \
+  --role party_b \
+  --apoa-pubkey "$(cat mark_apoa.pub)"
+
+# Both sign the NDA using regular sign commands;
+# the signing_session_id on each pending_signature
+# links them back to this session.
+
+# Party A completes once both pendings are approved
+ssh sshsign.dev complete-session \
+  --session-id nda_acme_bay_2026 \
+  --executed-artifact sshsign://artifact/nda_final.pdf
+```
+
+A runnable version of this flow lives at `examples/counter-sign-nda.sh`.
+
+### Employment offer negotiation (narrative example)
+
+The session model accommodates richer multi-party flows. Sketch of an employment-offer use case:
+
+1. **Hiring manager** creates a session with role `employer`, attaches metadata like `{"use_case":"employment","position":"Staff Engineer"}`
+2. **Candidate** joins as `candidate`. Both sides' APOA tokens bound to *their* authorized negotiation ranges:
+   - Candidate's token: `base_salary >= $X`, `equity >= N%`, `start_date <= Y`
+   - Employer's token: `base_salary <= $Z`, `equity <= M%`, `non_compete required`
+3. The parties' agents exchange offers using the same `log-offer` / `history` machinery that SAFE negotiation uses; sshsign's authorization engine rejects any offer that violates either party's token
+4. On agreement, each party signs the executed offer letter; session transitions to `completed`
+5. Hiring manager shares the `/audit/<session_id>` URL with HR; the audit shows who signed what when without leaking either side's actual negotiation ceiling or floor
+
+The same pattern applies to lending rounds, vendor contract negotiations, DAO proposal ratification, and any other flow where N parties jointly commit to a shared artifact under individually-authorized constraints.
 
 ## Running the server
 
