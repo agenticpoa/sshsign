@@ -43,6 +43,11 @@ var (
 	ErrCodeCollision  = errors.New("session_code collision after retries")
 	ErrRateLimit      = errors.New("rate limit exceeded")
 	ErrInvalidStatus  = errors.New("invalid status transition")
+	// ErrGroupAlreadyBound is returned by BindGroup when the session is
+	// already bound to a different group_chat_id. Write-once semantics:
+	// callers must cancel the session and start a new one if they want
+	// to re-bind, so a leaked bind can never be silently overwritten.
+	ErrGroupAlreadyBound = errors.New("session is already bound to a different group")
 )
 
 // Session is the first-class record describing a multi-party signing
@@ -62,6 +67,7 @@ type Session struct {
 	MetadataPublic    string // visible to anyone with the session_code
 	MetadataMember    string // visible ONLY to members
 	ViewToken         string // shareable read-only audit token; empty until issued
+	GroupChatID       int64  // Telegram group chat_id (or equivalent); 0 = unbound
 }
 
 // Member represents one party in a session.

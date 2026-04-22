@@ -442,6 +442,161 @@ func TestIsMember(t *testing.T) {
 	}
 }
 
+// ─── BindGroup ────────────────────────────────────────────────────
+
+func TestBindGroup_FirstBindSucceedsAndPersists(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+
+	after, err := r.BindGroup(sess.SessionID, "alice", -1001234567890)
+	if err != nil {
+		t.Fatalf("BindGroup: %v", err)
+	}
+	if after.GroupChatID != -1001234567890 {
+		t.Errorf("GroupChatID = %d, want -1001234567890", after.GroupChatID)
+	}
+
+	// Re-read via GetByID to confirm persistence.
+	reloaded, _ := r.GetByID(sess.SessionID)
+	if reloaded.GroupChatID != -1001234567890 {
+		t.Errorf("reloaded GroupChatID = %d, want persisted value", reloaded.GroupChatID)
+	}
+}
+
+func TestBindGroup_SameValueIsNoOp(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	_, _ = r.BindGroup(sess.SessionID, "alice", -1001)
+
+	// Second bind with same value should not error (idempotent).
+	after, err := r.BindGroup(sess.SessionID, "alice", -1001)
+	if err != nil {
+		t.Fatalf("idempotent rebind: %v", err)
+	}
+	if after.GroupChatID != -1001 {
+		t.Errorf("GroupChatID = %d, want -1001", after.GroupChatID)
+	}
+
+	// Audit should only record ONE group_bound event.
+	events, _ := r.Audit(sess.SessionID)
+	count := 0
+	for _, e := range events {
+		if e.EventType == "group_bound" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("group_bound events = %d, want 1", count)
+	}
+}
+
+func TestBindGroup_DifferentValueReturnsConflict(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	_, _ = r.BindGroup(sess.SessionID, "alice", -1001)
+
+	_, err := r.BindGroup(sess.SessionID, "alice", -2002)
+	if !errors.Is(err, ErrGroupAlreadyBound) {
+		t.Errorf("err = %v, want ErrGroupAlreadyBound", err)
+	}
+
+	// Original value must still be intact.
+	reloaded, _ := r.GetByID(sess.SessionID)
+	if reloaded.GroupChatID != -1001 {
+		t.Errorf("GroupChatID = %d, want -1001 (unchanged)", reloaded.GroupChatID)
+	}
+}
+
+func TestBindGroup_NonMemberRejected(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+
+	_, err := r.BindGroup(sess.SessionID, "charlie", -1001)
+	if !errors.Is(err, ErrNotMember) {
+		t.Errorf("err = %v, want ErrNotMember", err)
+	}
+}
+
+func TestBindGroup_AnyMemberMayBind(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	_, _ = r.Join(JoinParams{
+		SessionCode: sess.SessionCode, UserID: "bob",
+		Role: "investor", APOAPubkeyPEM: "BOB",
+	})
+
+	// Investor (non-creator) binds — should succeed.
+	after, err := r.BindGroup(sess.SessionID, "bob", -3003)
+	if err != nil {
+		t.Fatalf("investor bind: %v", err)
+	}
+	if after.GroupChatID != -3003 {
+		t.Errorf("GroupChatID = %d, want -3003", after.GroupChatID)
+	}
+}
+
+func TestBindGroup_TerminalSessionRejected(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	_, _ = r.Cancel(sess.SessionID, "alice", StatusCanceled)
+
+	_, err := r.BindGroup(sess.SessionID, "alice", -1001)
+	if !errors.Is(err, ErrTerminal) {
+		t.Errorf("err = %v, want ErrTerminal", err)
+	}
+}
+
+func TestBindGroup_ZeroValueRejected(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+
+	_, err := r.BindGroup(sess.SessionID, "alice", 0)
+	if err == nil {
+		t.Error("expected error for zero group_chat_id")
+	}
+}
+
+func TestBindGroup_WritesAuditEntry(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	_, _ = r.BindGroup(sess.SessionID, "alice", -7777)
+
+	events, _ := r.Audit(sess.SessionID)
+	var bind *AuditEvent
+	for i := range events {
+		if events[i].EventType == "group_bound" {
+			bind = &events[i]
+			break
+		}
+	}
+	if bind == nil {
+		t.Fatal("no group_bound audit event")
+	}
+	if bind.ActorID != "alice" {
+		t.Errorf("actor = %q, want alice", bind.ActorID)
+	}
+	if !contains(bind.Details, "-7777") {
+		t.Errorf("details = %q, should contain -7777", bind.Details)
+	}
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
 // ─── Audit ────────────────────────────────────────────────────────
 
 func TestAudit_RecordsFullLifecycle(t *testing.T) {

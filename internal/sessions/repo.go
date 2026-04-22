@@ -433,6 +433,76 @@ func (r *Repo) Cancel(sessionID, actorUserID string, target Status) (*Session, e
 	return r.GetByID(sessionID)
 }
 
+// BindGroup associates a session with a chat venue (e.g. a Telegram group
+// chat_id). Write-once: the first non-zero bind wins, subsequent calls with
+// the SAME value are a no-op, calls with a DIFFERENT value return
+// ErrGroupAlreadyBound. Any session member may bind. Write is rejected if
+// the session is already in a terminal state.
+//
+// The chosen value is opaque to sshsign — consumers pick the integer
+// semantics that fit their venue (Telegram group chat_ids are negative;
+// Slack would use a channel numeric id; a future consumer could use any
+// int64). sshsign just records and serves it back.
+func (r *Repo) BindGroup(sessionID, actorUserID string, groupChatID int64) (*Session, error) {
+	if groupChatID == 0 {
+		return nil, errors.New("group_chat_id must be non-zero")
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	sess, err := r.getByIDTx(tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if sess.Status.IsTerminal() {
+		return nil, fmt.Errorf("%w: %s", ErrTerminal, sess.Status)
+	}
+
+	var isMember int
+	err = tx.QueryRow(
+		`SELECT 1 FROM signing_session_members
+		 WHERE session_id = ? AND user_id = ?`,
+		sessionID, actorUserID,
+	).Scan(&isMember)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotMember
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Write-once semantics: existing bind with same value is idempotent
+	// no-op; existing bind with different value is a conflict.
+	if sess.GroupChatID != 0 {
+		if sess.GroupChatID == groupChatID {
+			return sess, tx.Commit()
+		}
+		return nil, ErrGroupAlreadyBound
+	}
+
+	_, err = tx.Exec(
+		`UPDATE signing_sessions SET group_chat_id = ? WHERE session_id = ?`,
+		groupChatID, sessionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := writeAudit(tx, sessionID, "group_bound", actorUserID,
+		fmt.Sprintf(`{"group_chat_id":%d}`, groupChatID)); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r.GetByID(sessionID)
+}
+
 // Complete transitions a session to 'completed'. Creator-only.
 // Idempotent: calling twice with the same args returns the current
 // state without changing anything.
@@ -628,7 +698,8 @@ func getByCodeTx(tx *sql.Tx, code string) (*Session, error) {
 const sessionSelectColumns = `SELECT session_id, session_code, created_by, created_at, expires_at,
        status, COALESCE(canceled_by, ''), COALESCE(completed_at, ''),
        COALESCE(finalized_by, ''), COALESCE(executed_artifact, ''),
-       metadata_public, metadata_member, COALESCE(view_token, '')`
+       metadata_public, metadata_member, COALESCE(view_token, ''),
+       COALESCE(group_chat_id, 0)`
 
 type rowScanner interface {
 	Scan(dest ...interface{}) error
@@ -643,6 +714,7 @@ func scanSessionRow(row rowScanner) (*Session, error) {
 		&createdAt, &expiresAt, &status,
 		&s.CanceledBy, &completedAt, &s.FinalizedBy, &s.ExecutedArtifact,
 		&s.MetadataPublic, &s.MetadataMember, &s.ViewToken,
+		&s.GroupChatID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

@@ -28,6 +28,7 @@ type sessionView struct {
 	MetadataPublic   string            `json:"metadata_public"`
 	MetadataMember   string            `json:"metadata_member,omitempty"` // omitted for non-members
 	Members          []memberView      `json:"members,omitempty"`         // omitted for non-members
+	GroupChatID      int64             `json:"group_chat_id,omitempty"`   // 0 = unbound
 }
 
 type memberView struct {
@@ -60,6 +61,7 @@ func marshalSession(sess *sessions.Session, members []sessions.Member, includeMe
 		FinalizedBy:      sess.FinalizedBy,
 		ExecutedArtifact: sess.ExecutedArtifact,
 		MetadataPublic:   sess.MetadataPublic,
+		GroupChatID:      sess.GroupChatID,
 	}
 	if !sess.CompletedAt.IsZero() {
 		v.CompletedAt = sess.CompletedAt.Format(time.RFC3339)
@@ -290,6 +292,40 @@ func handleAuditSession(sess ssh.Session, sc *SessionContext, args []string) {
 		})
 	}
 	writeJSON(sess, out)
+}
+
+// handleBindGroup: `bind-group --session-id ID --group-chat-id INT`.
+// Write-once: first non-zero bind wins. Any session member may bind.
+// Idempotent on a re-bind with the same chat_id.
+func handleBindGroup(sess ssh.Session, sc *SessionContext, args []string) {
+	flags, err := parseSessionFlags(args)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: err.Error()})
+		return
+	}
+	if flags["session-id"] == "" || flags["group-chat-id"] == "" {
+		writeJSON(sess, errorResponse{Error: "session-id and group-chat-id are required"})
+		return
+	}
+
+	var chatID int64
+	if _, perr := fmt.Sscan(flags["group-chat-id"], &chatID); perr != nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("group-chat-id must be an integer: %v", perr)})
+		return
+	}
+
+	repo := sessions.NewRepo(sc.DB)
+	after, err := repo.BindGroup(flags["session-id"], sc.User.UserID, chatID)
+	if err != nil {
+		if errors.Is(err, sessions.ErrGroupAlreadyBound) {
+			writeJSON(sess, errorResponse{Error: "group_already_bound"})
+			return
+		}
+		writeJSON(sess, errorResponse{Error: err.Error()})
+		return
+	}
+	members, _ := repo.Members(after.SessionID)
+	writeJSON(sess, marshalSession(after, members, true))
 }
 
 // parseSessionFlags is a minimal --key value flag parser. Supports
