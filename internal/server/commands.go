@@ -16,6 +16,7 @@ import (
 	"github.com/agenticpoa/sshsign/internal/audit"
 	"github.com/agenticpoa/sshsign/internal/auth"
 	apoacrypto "github.com/agenticpoa/sshsign/internal/crypto"
+	"github.com/agenticpoa/sshsign/internal/sessions"
 	"github.com/agenticpoa/sshsign/internal/signing"
 	"github.com/agenticpoa/sshsign/internal/storage"
 )
@@ -837,11 +838,27 @@ func handleGetEnvelope(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	// Verify the caller owns the pending (is the principal or the requester)
+	// Verify the caller owns the pending (is the principal or the requester),
+	// OR is a member of the signing session this pending is linked to. The
+	// session-member path exists so that during a multi-party signing
+	// ceremony, either party can fetch the other's envelope to reconstruct
+	// the fully-signed artifact locally. Without this, a two-party SAFE
+	// signature only produces an executed PDF for the creator side.
 	authToken, _ := storage.GetAuthorization(sc.DB, ps.AuthTokenID)
-	if authToken == nil || (authToken.GrantedBy != sc.User.UserID && ps.RequesterID != sc.User.UserID) {
-		writeJSON(sess, errorResponse{Error: "not authorized to access this pending signature"})
-		return
+	ownsDirectly := authToken != nil &&
+		(authToken.GrantedBy == sc.User.UserID || ps.RequesterID == sc.User.UserID)
+	if !ownsDirectly {
+		ownsViaSession := false
+		if ps.SigningSessionID != "" {
+			repo := sessions.NewRepo(sc.DB)
+			if m, err := repo.IsMember(ps.SigningSessionID, sc.User.UserID); err == nil && m {
+				ownsViaSession = true
+			}
+		}
+		if !ownsViaSession {
+			writeJSON(sess, errorResponse{Error: "not authorized to access this pending signature"})
+			return
+		}
 	}
 
 	// Build response with status info
