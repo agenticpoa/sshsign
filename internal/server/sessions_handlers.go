@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -383,6 +384,26 @@ func parseSessionFlags(args []string) (map[string]string, error) {
 			// newline-join because `-----BEGIN\nPUBLIC\nKEY-----` is not
 			// a valid PEM header.
 			val = joinPEMParts(parts)
+		} else if strings.HasPrefix(val, "{") || strings.HasPrefix(val, "[") {
+			// JSON value with spaces — SSH splits `{"a":1, "b":2}` on
+			// whitespace, so we rejoin until either the value parses
+			// as valid JSON or a real flag appears. Same accommodation
+			// parseJSONArg (commands.go) makes for legacy commands; also
+			// tolerate SSH stripping inner double quotes (so
+			// `{"use_case":"safe"}` may arrive as `{use_case:safe}`).
+			for !json.Valid([]byte(val)) && !json.Valid([]byte(fixBareJSONKeys(val))) &&
+				i+1 < len(args) && !isFlag(args[i+1]) {
+				val += " " + args[i+1]
+				i++
+			}
+			if !json.Valid([]byte(val)) {
+				// Last-ditch: try bare-keys repair so the value at least
+				// parses downstream. If neither works, pass through and
+				// let the handler's JSON-unmarshal surface the error.
+				if fixed := fixBareJSONKeys(val); json.Valid([]byte(fixed)) {
+					val = fixed
+				}
+			}
 		}
 		out[key] = val
 	}

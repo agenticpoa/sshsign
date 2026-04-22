@@ -147,3 +147,48 @@ func TestParseSessionFlags_RejectsBareArg(t *testing.T) {
 		t.Fatalf("expected error for bare arg")
 	}
 }
+
+func TestParseSessionFlags_JSONWithSpaces(t *testing.T) {
+	// SSH splits `{"use_case":"safe", "version":1}` on the comma-space,
+	// so the value arrives as multiple args. The parser must rejoin
+	// until JSON is valid.
+	args := []string{
+		"--metadata-public",
+		`{"use_case":"safe",`, `"version":1,`, `"company_name":"APOA`, `Inc"}`,
+		"--role", "founder",
+	}
+	out, err := parseSessionFlags(args)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out["role"] != "founder" {
+		t.Fatalf("role lost after JSON rejoin: %#v", out)
+	}
+	md := out["metadata-public"]
+	if !strings.Contains(md, "APOA Inc") {
+		t.Fatalf("JSON not rejoined properly: %q", md)
+	}
+}
+
+func TestParseSessionFlags_BareKeysWithValuesPassedThrough(t *testing.T) {
+	// Pathological case where SSH strips ALL inner quotes and there's
+	// nothing to rejoin (`{use_case:safe}` is malformed JSON we cannot
+	// repair: bare value `safe` has no context). Parser passes it
+	// through unchanged; the session handler's downstream JSON decode
+	// surfaces a clearer error to the user than an argv complaint.
+	args := []string{
+		"--metadata-public", "{use_case:safe}",
+		"--role", "founder",
+	}
+	out, err := parseSessionFlags(args)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out["role"] != "founder" {
+		t.Fatalf("role lost: %#v", out)
+	}
+	// Pass-through, unchanged.
+	if out["metadata-public"] != "{use_case:safe}" {
+		t.Fatalf("expected pass-through, got: %q", out["metadata-public"])
+	}
+}
