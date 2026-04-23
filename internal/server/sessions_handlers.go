@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -443,5 +444,45 @@ func parseSessionFlags(args []string) (map[string]string, error) {
 		}
 		out[key] = val
 	}
+
+	// P8-2: resolve base64-encoded metadata flags. SSH argv strips inner
+	// double quotes and the fixBareJSONKeys repair only covers bare keys,
+	// not bare string values — so JSON like `{"firm":"Blue Fund"}` gets
+	// mangled into `{firm:Blue Fund}` and fails to parse. The `-b64` suffix
+	// is the escape hatch: value is URL-safe base64 of the JSON text, which
+	// is a whitespace-free alphabet that SSH transports opaquely.
+	if err := resolveB64Metadata(out, "metadata-public"); err != nil {
+		return nil, err
+	}
+	if err := resolveB64Metadata(out, "metadata-member"); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// resolveB64Metadata decodes `<key>-b64` (URL-safe base64 JSON) into `<key>`.
+// Fails if both the plain and b64 forms are set. Fails if the base64 is
+// unparseable. Does not validate that the decoded text is JSON — that's
+// the storage layer's job; handlers store the string verbatim.
+func resolveB64Metadata(flags map[string]string, key string) error {
+	b64Key := key + "-b64"
+	encoded, ok := flags[b64Key]
+	if !ok {
+		return nil
+	}
+	if _, both := flags[key]; both {
+		return fmt.Errorf("cannot set both --%s and --%s", key, b64Key)
+	}
+	decoded, err := base64.URLEncoding.DecodeString(encoded)
+	if err != nil {
+		// Try standard encoding as a forgiving fallback — clients that
+		// forget to swap + for - shouldn't get a cryptic error.
+		decoded, err = base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return fmt.Errorf("invalid base64 for --%s: %v", b64Key, err)
+		}
+	}
+	flags[key] = string(decoded)
+	delete(flags, b64Key)
+	return nil
 }

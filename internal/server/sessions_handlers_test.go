@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/pem"
 	"strings"
 	"testing"
@@ -167,6 +168,97 @@ func TestParseSessionFlags_JSONWithSpaces(t *testing.T) {
 	md := out["metadata-public"]
 	if !strings.Contains(md, "APOA Inc") {
 		t.Fatalf("JSON not rejoined properly: %q", md)
+	}
+}
+
+// P8-2: `--metadata-*-b64` flags carry base64-encoded JSON so string
+// values with spaces or inner quotes survive SSH argv without needing
+// the fragile bare-value repair path.
+
+func TestParseSessionFlags_MetadataPublicB64Decoded(t *testing.T) {
+	raw := `{"use_case":"safe","version":1,"company_name":"Blue Fund"}`
+	encoded := base64.URLEncoding.EncodeToString([]byte(raw))
+	out, err := parseSessionFlags([]string{
+		"--role", "founder",
+		"--metadata-public-b64", encoded,
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out["metadata-public"] != raw {
+		t.Fatalf("expected %q, got %q", raw, out["metadata-public"])
+	}
+	if _, ok := out["metadata-public-b64"]; ok {
+		t.Fatalf("b64 key should be consumed, got: %#v", out)
+	}
+}
+
+func TestParseSessionFlags_MetadataMemberB64Decoded(t *testing.T) {
+	raw := `{"investor_firm":"Blue Fund","investor_name":"Alex Chen"}`
+	encoded := base64.URLEncoding.EncodeToString([]byte(raw))
+	out, err := parseSessionFlags([]string{
+		"--metadata-member-b64", encoded,
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out["metadata-member"] != raw {
+		t.Fatalf("got %q", out["metadata-member"])
+	}
+}
+
+func TestParseSessionFlags_B64FallsBackToStdEncoding(t *testing.T) {
+	// Client that forgets to swap + for - still works.
+	raw := `{"k":"a+b/c"}`
+	encoded := base64.StdEncoding.EncodeToString([]byte(raw))
+	out, err := parseSessionFlags([]string{"--metadata-public-b64", encoded})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out["metadata-public"] != raw {
+		t.Fatalf("got %q", out["metadata-public"])
+	}
+}
+
+func TestParseSessionFlags_B64RejectsInvalid(t *testing.T) {
+	_, err := parseSessionFlags([]string{"--metadata-public-b64", "!!!not-b64!!!"})
+	if err == nil {
+		t.Fatalf("expected error on invalid base64")
+	}
+	if !strings.Contains(err.Error(), "invalid base64") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseSessionFlags_B64AndPlainConflict(t *testing.T) {
+	// Clients must pick one form; supporting both silently would make
+	// precedence ambiguous (does b64 win? plain win?).
+	encoded := base64.URLEncoding.EncodeToString([]byte(`{"a":1}`))
+	_, err := parseSessionFlags([]string{
+		"--metadata-public", `{"a":1}`,
+		"--metadata-public-b64", encoded,
+	})
+	if err == nil {
+		t.Fatalf("expected error on double-set")
+	}
+	if !strings.Contains(err.Error(), "cannot set both") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseSessionFlags_B64PreservesInnerQuotesAcrossArgv(t *testing.T) {
+	// Regression fixture for the actual bug: a string value with a space
+	// that would have been mangled by the legacy repair path is bit-perfect
+	// after base64 round-trip.
+	raw := `{"investor_firm":"Blue Fund","investor_name":"Alex Chen"}`
+	encoded := base64.URLEncoding.EncodeToString([]byte(raw))
+	out, err := parseSessionFlags([]string{"--metadata-member-b64", encoded})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	// Must NOT have suffered quote-stripping.
+	if !strings.Contains(out["metadata-member"], `"Blue Fund"`) {
+		t.Fatalf("inner quotes lost: %q", out["metadata-member"])
 	}
 }
 
