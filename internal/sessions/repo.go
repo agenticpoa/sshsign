@@ -338,7 +338,8 @@ func (l *GetSessionRateLimiter) Allow(userID string) error {
 // Members returns all members of a session.
 func (r *Repo) Members(sessionID string) ([]Member, error) {
 	rows, err := r.db.Query(
-		`SELECT session_id, user_id, role, apoa_pubkey_pem, party_did, joined_at
+		`SELECT session_id, user_id, role, apoa_pubkey_pem, party_did, joined_at,
+		        founder_resumed_at, founder_streaming_at
 		 FROM signing_session_members WHERE session_id = ? ORDER BY joined_at`,
 		sessionID,
 	)
@@ -351,14 +352,93 @@ func (r *Repo) Members(sessionID string) ([]Member, error) {
 	for rows.Next() {
 		var m Member
 		var joinedAt string
+		var resumedAt, streamingAt sql.NullInt64
 		if err := rows.Scan(&m.SessionID, &m.UserID, &m.Role, &m.APOAPubkeyPEM,
-			&m.PartyDID, &joinedAt); err != nil {
+			&m.PartyDID, &joinedAt, &resumedAt, &streamingAt); err != nil {
 			return nil, err
 		}
 		m.JoinedAt, _ = time.Parse(time.RFC3339Nano, joinedAt)
+		if resumedAt.Valid {
+			v := resumedAt.Int64
+			m.FounderResumedAt = &v
+		}
+		if streamingAt.Valid {
+			v := streamingAt.Int64
+			m.FounderStreamingAt = &v
+		}
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// updatableMemberFields is the whitelist of columns writable via
+// UpdateSessionMemberField. Introduced for P7-5 durable founder-wait.
+// New fields land here intentionally; defaulting to closed means the
+// RPC can never be coerced into touching anything else (session-id,
+// role, joined_at, pubkey, etc.).
+var updatableMemberFields = map[string]bool{
+	"founder_resumed_at":   true,
+	"founder_streaming_at": true,
+}
+
+// UpdateSessionMemberField sets a whitelisted integer column on the
+// caller's own member row. Creator-only — the founder is always the
+// creator, and P7-5's semantics are founder-only. Non-whitelisted
+// fields return ErrFieldNotWritable; any attempt to update another
+// member's row is silently a no-op since the WHERE clause binds to
+// actorUserID.
+//
+// Terminal sessions accept updates silently (idempotent after
+// completion); callers shouldn't be pinging update_session_member on
+// a terminal session in practice, but guarding against it here would
+// prevent the scan turn from recording its dedup attempt cleanly.
+func (r *Repo) UpdateSessionMemberField(
+	sessionID, actorUserID, field string, value int64,
+) error {
+	if !updatableMemberFields[field] {
+		return fmt.Errorf("%w: %q", ErrFieldNotWritable, field)
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	sess, err := r.getByIDTx(tx, sessionID)
+	if err != nil {
+		return err
+	}
+	if sess.CreatedBy != actorUserID {
+		return ErrNotCreator
+	}
+
+	// Field name is validated by the whitelist above, so string
+	// concatenation into the SQL is safe here (not user-controlled).
+	res, err := tx.Exec(
+		`UPDATE signing_session_members
+		 SET `+field+` = ?
+		 WHERE session_id = ? AND user_id = ?`,
+		value, sessionID, actorUserID,
+	)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		// Session exists and caller is creator, but no member row —
+		// sshsign's create-session always inserts the creator as a
+		// member, so this can only happen if someone deleted the
+		// row out of band. Surface it rather than silently no-op.
+		return fmt.Errorf("%w: creator has no member row", ErrNotMember)
+	}
+
+	details := fmt.Sprintf(`{"field":%q,"value":%d}`, field, value)
+	if err := writeAudit(tx, sessionID, "member_field_updated", actorUserID, details); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // IsMember returns true if userID is a member of the session.

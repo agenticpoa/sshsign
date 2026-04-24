@@ -48,6 +48,11 @@ var (
 	// callers must cancel the session and start a new one if they want
 	// to re-bind, so a leaked bind can never be silently overwritten.
 	ErrGroupAlreadyBound = errors.New("session is already bound to a different group")
+	// ErrFieldNotWritable is returned by UpdateSessionMemberField when
+	// the requested field is not in the P7-5 whitelist. Server-side
+	// defense against future whitelist expansions that might land in
+	// clients but not here.
+	ErrFieldNotWritable = errors.New("field not writable via update-session-member")
 )
 
 // Session is the first-class record describing a multi-party signing
@@ -78,6 +83,12 @@ type Member struct {
 	APOAPubkeyPEM  string
 	PartyDID       string // optional APOA-layer identifier; empty if consumer doesn't use DIDs
 	JoinedAt       time.Time
+	// P7-5 durable founder-wait fields. Nil = not set yet. Founder
+	// sets FounderResumedAt when a cron-triggered scan reattaches to
+	// a waiting session; FounderStreamingAt once the stream is
+	// actually running (investor's gate signal).
+	FounderResumedAt   *int64
+	FounderStreamingAt *int64
 }
 
 // AuditEvent is one entry in a session's append-only transition log.

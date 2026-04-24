@@ -597,6 +597,145 @@ func contains(s, sub string) bool {
 	return false
 }
 
+// ─── UpdateSessionMemberField (P7-5) ───────────────────────────────
+
+func TestUpdateSessionMemberField_HappyPathSetsResumedAt(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+
+	if err := r.UpdateSessionMemberField(
+		sess.SessionID, "alice", "founder_resumed_at", 1714000000,
+	); err != nil {
+		t.Fatalf("UpdateSessionMemberField: %v", err)
+	}
+
+	members, err := r.Members(sess.SessionID)
+	if err != nil {
+		t.Fatalf("Members: %v", err)
+	}
+	if len(members) != 1 {
+		t.Fatalf("want 1 member, got %d", len(members))
+	}
+	if members[0].FounderResumedAt == nil || *members[0].FounderResumedAt != 1714000000 {
+		t.Errorf("FounderResumedAt = %v, want 1714000000", members[0].FounderResumedAt)
+	}
+	if members[0].FounderStreamingAt != nil {
+		t.Errorf("FounderStreamingAt should still be nil, got %v",
+			*members[0].FounderStreamingAt)
+	}
+}
+
+func TestUpdateSessionMemberField_HappyPathSetsStreamingAt(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+
+	if err := r.UpdateSessionMemberField(
+		sess.SessionID, "alice", "founder_streaming_at", 1714000001,
+	); err != nil {
+		t.Fatalf("UpdateSessionMemberField: %v", err)
+	}
+	members, _ := r.Members(sess.SessionID)
+	if members[0].FounderStreamingAt == nil ||
+		*members[0].FounderStreamingAt != 1714000001 {
+		t.Errorf("FounderStreamingAt = %v, want 1714000001",
+			members[0].FounderStreamingAt)
+	}
+}
+
+func TestUpdateSessionMemberField_NonCreatorRejected(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	// bob is not the creator — shouldn't be able to set resumed_at.
+	// (We also join bob so there's a member row for the actor, but
+	// the creator-only gate still fires because sess.CreatedBy != "bob".)
+	_, _ = r.Join(JoinParams{
+		SessionCode: sess.SessionCode, UserID: "bob",
+		Role: "investor", APOAPubkeyPEM: "X",
+	})
+
+	err := r.UpdateSessionMemberField(
+		sess.SessionID, "bob", "founder_resumed_at", 1,
+	)
+	if !errors.Is(err, ErrNotCreator) {
+		t.Errorf("err = %v, want ErrNotCreator", err)
+	}
+}
+
+func TestUpdateSessionMemberField_NonWhitelistedFieldRejected(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+
+	for _, f := range []string{"role", "apoa_pubkey_pem", "party_did", "joined_at", "user_id"} {
+		err := r.UpdateSessionMemberField(sess.SessionID, "alice", f, 42)
+		if !errors.Is(err, ErrFieldNotWritable) {
+			t.Errorf("field %q: err = %v, want ErrFieldNotWritable", f, err)
+		}
+	}
+}
+
+func TestUpdateSessionMemberField_WritesAuditRow(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+
+	if err := r.UpdateSessionMemberField(
+		sess.SessionID, "alice", "founder_resumed_at", 1714000002,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	events, _ := r.Audit(sess.SessionID)
+	var found bool
+	for _, e := range events {
+		if e.EventType == "member_field_updated" && e.ActorID == "alice" {
+			if !contains(e.Details, `"field":"founder_resumed_at"`) {
+				t.Errorf("audit details missing field marker: %s", e.Details)
+			}
+			if !contains(e.Details, `"value":1714000002`) {
+				t.Errorf("audit details missing value: %s", e.Details)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no member_field_updated audit row found; got: %+v", events)
+	}
+}
+
+func TestUpdateSessionMemberField_UnknownSession(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	err := r.UpdateSessionMemberField(
+		"neg_does_not_exist", "alice", "founder_resumed_at", 1,
+	)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUpdateSessionMemberField_IdempotentAcrossCalls(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	for _, v := range []int64{1714000000, 1714000001, 1714000002} {
+		if err := r.UpdateSessionMemberField(
+			sess.SessionID, "alice", "founder_resumed_at", v,
+		); err != nil {
+			t.Fatalf("value %d: %v", v, err)
+		}
+	}
+	members, _ := r.Members(sess.SessionID)
+	// Last-write-wins: final value is the third call's.
+	if *members[0].FounderResumedAt != 1714000002 {
+		t.Errorf("FounderResumedAt = %d, want 1714000002",
+			*members[0].FounderResumedAt)
+	}
+}
+
 // ─── Audit ────────────────────────────────────────────────────────
 
 func TestAudit_RecordsFullLifecycle(t *testing.T) {

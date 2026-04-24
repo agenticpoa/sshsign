@@ -295,6 +295,48 @@ func handleAuditSession(sess ssh.Session, sc *SessionContext, args []string) {
 	writeJSON(sess, out)
 }
 
+// handleUpdateSessionMember: P7-5 RPC that lets the session creator
+// set whitelisted integer fields on their own member row. Today's
+// whitelist is {founder_resumed_at, founder_streaming_at}; the repo
+// layer owns enforcement via ErrFieldNotWritable, so this handler
+// just parses flags and delegates.
+//
+//   update-session-member --session-id ID --field NAME --value INT
+func handleUpdateSessionMember(sess ssh.Session, sc *SessionContext, args []string) {
+	flags, err := parseSessionFlags(args)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: err.Error()})
+		return
+	}
+	if flags["session-id"] == "" || flags["field"] == "" || flags["value"] == "" {
+		writeJSON(sess, errorResponse{Error: "session-id, field, and value are required"})
+		return
+	}
+
+	var value int64
+	if _, perr := fmt.Sscan(flags["value"], &value); perr != nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("value must be an integer: %v", perr)})
+		return
+	}
+
+	repo := sessions.NewRepo(sc.DB)
+	if err := repo.UpdateSessionMemberField(
+		flags["session-id"], sc.User.UserID, flags["field"], value,
+	); err != nil {
+		if errors.Is(err, sessions.ErrFieldNotWritable) {
+			writeJSON(sess, errorResponse{Error: "field_not_writable"})
+			return
+		}
+		if errors.Is(err, sessions.ErrNotCreator) {
+			writeJSON(sess, errorResponse{Error: "only the session creator may update members"})
+			return
+		}
+		writeJSON(sess, errorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(sess, map[string]bool{"ok": true})
+}
+
 // handleBindGroup: `bind-group --session-id ID --group-chat-id INT`.
 // Write-once: first non-zero bind wins. Any session member may bind.
 // Idempotent on a re-bind with the same chat_id.

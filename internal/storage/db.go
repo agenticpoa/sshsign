@@ -55,6 +55,12 @@ func Migrate(db *sql.DB) error {
 		`ALTER TABLE pending_signatures ADD COLUMN signature TEXT`,
 		`ALTER TABLE signing_sessions ADD COLUMN view_token TEXT`,
 		`ALTER TABLE signing_sessions ADD COLUMN group_chat_id INTEGER`,
+		// P7-5: durable founder-wait. Creator sets founder_resumed_at
+		// on resume; founder_streaming_at once _stream_to_telegram is
+		// actually running. Investor polls on founder_streaming_at
+		// (not resumed_at) so a crash between the two is recoverable.
+		`ALTER TABLE signing_session_members ADD COLUMN founder_resumed_at INTEGER`,
+		`ALTER TABLE signing_session_members ADD COLUMN founder_streaming_at INTEGER`,
 	}
 	for _, m := range columnMigrations {
 		_, err := db.Exec(m)
@@ -175,12 +181,17 @@ CREATE INDEX IF NOT EXISTS idx_signing_sessions_code ON signing_sessions(session
 CREATE INDEX IF NOT EXISTS idx_signing_sessions_status_expires ON signing_sessions(status, expires_at);
 
 CREATE TABLE IF NOT EXISTS signing_session_members (
-	session_id       TEXT NOT NULL REFERENCES signing_sessions(session_id),
-	user_id          TEXT NOT NULL REFERENCES users(user_id),
-	role             TEXT NOT NULL,
-	apoa_pubkey_pem  TEXT NOT NULL,
-	party_did        TEXT NOT NULL DEFAULT '',
-	joined_at        TEXT NOT NULL DEFAULT (datetime('now')),
+	session_id            TEXT NOT NULL REFERENCES signing_sessions(session_id),
+	user_id               TEXT NOT NULL REFERENCES users(user_id),
+	role                  TEXT NOT NULL,
+	apoa_pubkey_pem       TEXT NOT NULL,
+	party_did             TEXT NOT NULL DEFAULT '',
+	joined_at             TEXT NOT NULL DEFAULT (datetime('now')),
+	-- P7-5 durable founder-wait fields (unix epoch seconds, NULL until set
+	-- by the creator via update-session-member). See columnMigrations for
+	-- the migration path applied to existing databases.
+	founder_resumed_at    INTEGER,
+	founder_streaming_at  INTEGER,
 	PRIMARY KEY (session_id, user_id)
 );
 

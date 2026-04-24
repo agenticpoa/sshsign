@@ -97,6 +97,8 @@ func CommandHandler(sess ssh.Session, sc *SessionContext) {
 		handleAuditSession(sess, sc, cmd[1:])
 	case "bind-group":
 		handleBindGroup(sess, sc, cmd[1:])
+	case "update-session-member":
+		handleUpdateSessionMember(sess, sc, cmd[1:])
 	default:
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("unknown command '%s'", cmd[0])})
 	}
