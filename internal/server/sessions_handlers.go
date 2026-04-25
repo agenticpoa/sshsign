@@ -38,6 +38,12 @@ type memberView struct {
 	PartyDID      string `json:"party_did,omitempty"`
 	APOAPubkeyPEM string `json:"apoa_pubkey_pem"`
 	JoinedAt      string `json:"joined_at"`
+	// P7-5 durable founder-wait timestamps. omitempty so unset stays
+	// absent from the wire — Python consumer treats absent and null
+	// identically (m.get(...) is None either way). Pointer-to-int64
+	// preserves the SQL NULL distinction at the layer below.
+	FounderResumedAt   *int64 `json:"founder_resumed_at,omitempty"`
+	FounderStreamingAt *int64 `json:"founder_streaming_at,omitempty"`
 }
 
 type auditEventView struct {
@@ -72,11 +78,13 @@ func marshalSession(sess *sessions.Session, members []sessions.Member, includeMe
 		v.Members = make([]memberView, 0, len(members))
 		for _, m := range members {
 			v.Members = append(v.Members, memberView{
-				Role:          m.Role,
-				UserID:        m.UserID,
-				PartyDID:      m.PartyDID,
-				APOAPubkeyPEM: m.APOAPubkeyPEM,
-				JoinedAt:      m.JoinedAt.Format(time.RFC3339),
+				Role:               m.Role,
+				UserID:             m.UserID,
+				PartyDID:           m.PartyDID,
+				APOAPubkeyPEM:      m.APOAPubkeyPEM,
+				JoinedAt:           m.JoinedAt.Format(time.RFC3339),
+				FounderResumedAt:   m.FounderResumedAt,
+				FounderStreamingAt: m.FounderStreamingAt,
 			})
 		}
 	}

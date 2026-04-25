@@ -2,9 +2,12 @@ package server
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"strings"
 	"testing"
+
+	"github.com/agenticpoa/sshsign/internal/sessions"
 )
 
 func TestParseSessionFlags_SimpleKV(t *testing.T) {
@@ -282,5 +285,49 @@ func TestParseSessionFlags_BareKeysWithValuesPassedThrough(t *testing.T) {
 	// Pass-through, unchanged.
 	if out["metadata-public"] != "{use_case:safe}" {
 		t.Fatalf("expected pass-through, got: %q", out["metadata-public"])
+	}
+}
+
+// P7-5 regression: marshalSession must serialize founder_resumed_at +
+// founder_streaming_at when set on a Member. They were initially missed
+// (added to the DB schema + Member struct + repo SELECT, but not to the
+// wire-format memberView), causing the investor's Python poll to never
+// see streaming_at and time out at 180s instead of detecting the live
+// founder. Caught during the first live dry-run on INV-6Z4K7.
+func TestMarshalSession_IncludesFounderResumedAndStreamingTimestamps(t *testing.T) {
+	resumedAt := int64(1714000000)
+	streamingAt := int64(1714000005)
+
+	sess := &sessions.Session{
+		SessionID:   "neg_1",
+		SessionCode: "INV-X",
+		CreatedBy:   "alice",
+		Status:      "joined",
+	}
+	members := []sessions.Member{
+		{
+			Role:               "founder",
+			UserID:             "alice",
+			FounderResumedAt:   &resumedAt,
+			FounderStreamingAt: &streamingAt,
+		},
+		{Role: "investor", UserID: "bob"}, // both fields nil → omitempty
+	}
+
+	v := marshalSession(sess, members, true)
+	out, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	body := string(out)
+	if !strings.Contains(body, `"founder_resumed_at":1714000000`) {
+		t.Errorf("founder_resumed_at missing from wire format: %s", body)
+	}
+	if !strings.Contains(body, `"founder_streaming_at":1714000005`) {
+		t.Errorf("founder_streaming_at missing from wire format: %s", body)
+	}
+	// Investor row has nil pointers → keys must be omitted.
+	if strings.Contains(body, `"role":"investor",.*"founder_resumed_at"`) {
+		t.Errorf("nil pointer should be omitted, not zero-serialized: %s", body)
 	}
 }
