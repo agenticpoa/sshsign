@@ -736,6 +736,130 @@ func TestUpdateSessionMemberField_IdempotentAcrossCalls(t *testing.T) {
 	}
 }
 
+// ─── UpdateSessionMemberText (inverted-invitation) ────────────────
+
+func TestUpdateSessionMemberText_FounderSelfWrites(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+
+	if err := r.UpdateSessionMemberText(
+		sess.SessionID, "alice", "bot_handle", "@alice_negotiator_bot",
+	); err != nil {
+		t.Fatalf("UpdateSessionMemberText: %v", err)
+	}
+
+	members, _ := r.Members(sess.SessionID)
+	if members[0].BotHandle != "@alice_negotiator_bot" {
+		t.Errorf("BotHandle = %q, want @alice_negotiator_bot", members[0].BotHandle)
+	}
+}
+
+func TestUpdateSessionMemberText_InvestorSelfWrites(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	// Investor joins, then writes their own bot_handle.
+	_, _ = r.Join(JoinParams{
+		SessionCode: sess.SessionCode, UserID: "bob",
+		Role: "investor", APOAPubkeyPEM: "X",
+	})
+
+	if err := r.UpdateSessionMemberText(
+		sess.SessionID, "bob", "bot_handle", "@bob_invests_bot",
+	); err != nil {
+		t.Fatalf("investor self-write: %v", err)
+	}
+
+	members, _ := r.Members(sess.SessionID)
+	var bobs *Member
+	for i := range members {
+		if members[i].UserID == "bob" {
+			bobs = &members[i]
+		}
+	}
+	if bobs == nil || bobs.BotHandle != "@bob_invests_bot" {
+		t.Errorf("investor bot_handle = %v, want @bob_invests_bot", bobs)
+	}
+}
+
+func TestUpdateSessionMemberText_NonMemberRejected(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	// charlie isn't a member. Self-write WHERE clause finds no row.
+	err := r.UpdateSessionMemberText(
+		sess.SessionID, "charlie", "bot_handle", "@charlie_bot",
+	)
+	if !errors.Is(err, ErrNotMember) {
+		t.Errorf("err = %v, want ErrNotMember", err)
+	}
+}
+
+func TestUpdateSessionMemberText_NonWhitelistedFieldRejected(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+
+	for _, f := range []string{"role", "apoa_pubkey_pem", "user_id", "party_did"} {
+		err := r.UpdateSessionMemberText(sess.SessionID, "alice", f, "x")
+		if !errors.Is(err, ErrFieldNotWritable) {
+			t.Errorf("field %q: err = %v, want ErrFieldNotWritable", f, err)
+		}
+	}
+}
+
+func TestUpdateSessionMemberText_AnotherMemberCannotMutateMyRow(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	_, _ = r.Join(JoinParams{
+		SessionCode: sess.SessionCode, UserID: "bob",
+		Role: "investor", APOAPubkeyPEM: "X",
+	})
+
+	// alice writes alice's row (her own).
+	_ = r.UpdateSessionMemberText(sess.SessionID, "alice", "bot_handle", "@alice_bot")
+	// bob writes bob's row.
+	_ = r.UpdateSessionMemberText(sess.SessionID, "bob", "bot_handle", "@bob_bot")
+
+	// Confirm: each member's bot_handle reflects what THAT member
+	// wrote, not the other way around. The WHERE clause binds to
+	// actorUserID, so cross-row mutation is structurally impossible.
+	members, _ := r.Members(sess.SessionID)
+	for _, m := range members {
+		if m.UserID == "alice" && m.BotHandle != "@alice_bot" {
+			t.Errorf("alice's row got %q, want @alice_bot", m.BotHandle)
+		}
+		if m.UserID == "bob" && m.BotHandle != "@bob_bot" {
+			t.Errorf("bob's row got %q, want @bob_bot", m.BotHandle)
+		}
+	}
+}
+
+func TestUpdateSessionMemberText_AuditTrail(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	_ = r.UpdateSessionMemberText(
+		sess.SessionID, "alice", "bot_handle", "@alice_bot",
+	)
+	events, _ := r.Audit(sess.SessionID)
+	var found bool
+	for _, e := range events {
+		if e.EventType == "member_text_updated" && e.ActorID == "alice" {
+			if !contains(e.Details, `"bot_handle"`) ||
+				!contains(e.Details, `"@alice_bot"`) {
+				t.Errorf("audit details missing field/value: %s", e.Details)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no member_text_updated audit row found")
+	}
+}
+
 // ─── Audit ────────────────────────────────────────────────────────
 
 func TestAudit_RecordsFullLifecycle(t *testing.T) {

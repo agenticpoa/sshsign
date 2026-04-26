@@ -61,6 +61,12 @@ func Migrate(db *sql.DB) error {
 		// (not resumed_at) so a crash between the two is recoverable.
 		`ALTER TABLE signing_session_members ADD COLUMN founder_resumed_at INTEGER`,
 		`ALTER TABLE signing_session_members ADD COLUMN founder_streaming_at INTEGER`,
+		// Inverted-invitation: each member's own Telegram bot handle.
+		// Member self-writes their own row at create-session (founder)
+		// and join-session (investor). Used by the OTHER side to
+		// compose attribution-correct UI cards (create-group hint,
+		// rejection redirects, waiting card).
+		`ALTER TABLE signing_session_members ADD COLUMN bot_handle TEXT`,
 	}
 	for _, m := range columnMigrations {
 		_, err := db.Exec(m)
@@ -192,6 +198,9 @@ CREATE TABLE IF NOT EXISTS signing_session_members (
 	-- the migration path applied to existing databases.
 	founder_resumed_at    INTEGER,
 	founder_streaming_at  INTEGER,
+	-- Inverted-invitation: each member's own Telegram bot handle. NULL
+	-- until the member's own bot writes it (member-self-write ACL).
+	bot_handle            TEXT,
 	PRIMARY KEY (session_id, user_id)
 );
 

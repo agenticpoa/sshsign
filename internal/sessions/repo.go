@@ -339,7 +339,7 @@ func (l *GetSessionRateLimiter) Allow(userID string) error {
 func (r *Repo) Members(sessionID string) ([]Member, error) {
 	rows, err := r.db.Query(
 		`SELECT session_id, user_id, role, apoa_pubkey_pem, party_did, joined_at,
-		        founder_resumed_at, founder_streaming_at
+		        founder_resumed_at, founder_streaming_at, bot_handle
 		 FROM signing_session_members WHERE session_id = ? ORDER BY joined_at`,
 		sessionID,
 	)
@@ -353,8 +353,9 @@ func (r *Repo) Members(sessionID string) ([]Member, error) {
 		var m Member
 		var joinedAt string
 		var resumedAt, streamingAt sql.NullInt64
+		var botHandle sql.NullString
 		if err := rows.Scan(&m.SessionID, &m.UserID, &m.Role, &m.APOAPubkeyPEM,
-			&m.PartyDID, &joinedAt, &resumedAt, &streamingAt); err != nil {
+			&m.PartyDID, &joinedAt, &resumedAt, &streamingAt, &botHandle); err != nil {
 			return nil, err
 		}
 		m.JoinedAt, _ = time.Parse(time.RFC3339Nano, joinedAt)
@@ -366,19 +367,29 @@ func (r *Repo) Members(sessionID string) ([]Member, error) {
 			v := streamingAt.Int64
 			m.FounderStreamingAt = &v
 		}
+		if botHandle.Valid {
+			m.BotHandle = botHandle.String
+		}
 		out = append(out, m)
 	}
 	return out, rows.Err()
 }
 
-// updatableMemberFields is the whitelist of columns writable via
-// UpdateSessionMemberField. Introduced for P7-5 durable founder-wait.
-// New fields land here intentionally; defaulting to closed means the
-// RPC can never be coerced into touching anything else (session-id,
-// role, joined_at, pubkey, etc.).
+// updatableMemberFields is the whitelist of integer columns writable
+// via UpdateSessionMemberField. Creator-only ACL (founder writes their
+// own row). New fields land here intentionally.
 var updatableMemberFields = map[string]bool{
 	"founder_resumed_at":   true,
 	"founder_streaming_at": true,
+}
+
+// updatableMemberTextFields is the whitelist of TEXT columns writable
+// via UpdateSessionMemberText. Member-self-write ACL — any session
+// member can update their OWN row's whitelisted text fields.
+// Distinct from the integer field set because the ACL semantics
+// differ (creator-only vs. self-write).
+var updatableMemberTextFields = map[string]bool{
+	"bot_handle": true,
 }
 
 // UpdateSessionMemberField sets a whitelisted integer column on the
@@ -435,6 +446,59 @@ func (r *Repo) UpdateSessionMemberField(
 
 	details := fmt.Sprintf(`{"field":%q,"value":%d}`, field, value)
 	if err := writeAudit(tx, sessionID, "member_field_updated", actorUserID, details); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// UpdateSessionMemberText sets a whitelisted text column on the
+// caller's own member row. Member-self-write ACL — any session
+// member can update their own row's whitelisted text fields. This
+// distinguishes the inverted-invitation use case (each side writes
+// their OWN bot_handle) from the creator-only P7-5 timestamp fields.
+//
+// Whitelist: {bot_handle}. New text fields land here intentionally.
+// Empty values are accepted (clears the field); lengths are not
+// enforced at the DB layer — callers should keep handles ≤ 32 chars
+// per Telegram's bot username limit.
+func (r *Repo) UpdateSessionMemberText(
+	sessionID, actorUserID, field, value string,
+) error {
+	if !updatableMemberTextFields[field] {
+		return fmt.Errorf("%w: %q", ErrFieldNotWritable, field)
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := r.getByIDTx(tx, sessionID); err != nil {
+		return err
+	}
+
+	// Member-self-write: WHERE clause binds to actorUserID, so a
+	// caller can ONLY mutate their own row even if they pretended
+	// otherwise. No creator-only check.
+	res, err := tx.Exec(
+		`UPDATE signing_session_members
+		 SET `+field+` = ?
+		 WHERE session_id = ? AND user_id = ?`,
+		value, sessionID, actorUserID,
+	)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("%w: caller is not a member of this session", ErrNotMember)
+	}
+
+	// Audit captures the value verbatim (bot handles aren't secrets).
+	details := fmt.Sprintf(`{"field":%q,"text_value":%q}`, field, value)
+	if err := writeAudit(tx, sessionID, "member_text_updated", actorUserID, details); err != nil {
 		return err
 	}
 

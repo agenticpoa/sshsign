@@ -89,6 +89,12 @@ type Member struct {
 	// actually running (investor's gate signal).
 	FounderResumedAt   *int64
 	FounderStreamingAt *int64
+	// Inverted-invitation: each member's own Telegram bot handle.
+	// Self-written by the member's own bot at create / join time.
+	// Empty until the member writes it. Read by the OTHER side to
+	// compose attribution-correct UI (rejection redirects, post-join
+	// create-group card, investor waiting card).
+	BotHandle string
 }
 
 // AuditEvent is one entry in a session's append-only transition log.

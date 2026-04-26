@@ -44,6 +44,10 @@ type memberView struct {
 	// preserves the SQL NULL distinction at the layer below.
 	FounderResumedAt   *int64 `json:"founder_resumed_at,omitempty"`
 	FounderStreamingAt *int64 `json:"founder_streaming_at,omitempty"`
+	// Inverted-invitation: this member's own Telegram bot handle.
+	// Empty string omitted from wire so the OTHER side's consumer
+	// sees a missing field while it's still being written.
+	BotHandle string `json:"bot_handle,omitempty"`
 }
 
 type auditEventView struct {
@@ -85,6 +89,7 @@ func marshalSession(sess *sessions.Session, members []sessions.Member, includeMe
 				JoinedAt:           m.JoinedAt.Format(time.RFC3339),
 				FounderResumedAt:   m.FounderResumedAt,
 				FounderStreamingAt: m.FounderStreamingAt,
+				BotHandle:          m.BotHandle,
 			})
 		}
 	}
@@ -303,40 +308,78 @@ func handleAuditSession(sess ssh.Session, sc *SessionContext, args []string) {
 	writeJSON(sess, out)
 }
 
-// handleUpdateSessionMember: P7-5 RPC that lets the session creator
-// set whitelisted integer fields on their own member row. Today's
-// whitelist is {founder_resumed_at, founder_streaming_at}; the repo
-// layer owns enforcement via ErrFieldNotWritable, so this handler
-// just parses flags and delegates.
+// handleUpdateSessionMember: P7-5 RPC + inverted-invitation extension.
+// Two field kinds, each with its own ACL:
+//
+//   --value INT       → integer whitelist (creator-only ACL).
+//                        Today: founder_resumed_at, founder_streaming_at.
+//   --text-value STR  → text whitelist (member-self-write ACL).
+//                        Today: bot_handle.
+//
+// The repo layer owns enforcement; this handler just parses flags and
+// dispatches to the right repo method based on which value flag is set.
 //
 //   update-session-member --session-id ID --field NAME --value INT
+//   update-session-member --session-id ID --field NAME --text-value STR
 func handleUpdateSessionMember(sess ssh.Session, sc *SessionContext, args []string) {
 	flags, err := parseSessionFlags(args)
 	if err != nil {
 		writeJSON(sess, errorResponse{Error: err.Error()})
 		return
 	}
-	if flags["session-id"] == "" || flags["field"] == "" || flags["value"] == "" {
-		writeJSON(sess, errorResponse{Error: "session-id, field, and value are required"})
+	if flags["session-id"] == "" || flags["field"] == "" {
+		writeJSON(sess, errorResponse{Error: "session-id and field are required"})
 		return
 	}
 
-	var value int64
-	if _, perr := fmt.Sscan(flags["value"], &value); perr != nil {
-		writeJSON(sess, errorResponse{Error: fmt.Sprintf("value must be an integer: %v", perr)})
+	hasInt := flags["value"] != ""
+	// --text-value="" is a legitimate clear; check key presence via map lookup
+	// directly. parseSessionFlags omits the key entirely when not provided.
+	_, hasText := flags["text-value"]
+
+	if hasInt == hasText {
+		writeJSON(sess, errorResponse{
+			Error: "exactly one of --value (int) or --text-value (string) is required",
+		})
 		return
 	}
 
 	repo := sessions.NewRepo(sc.DB)
-	if err := repo.UpdateSessionMemberField(
-		flags["session-id"], sc.User.UserID, flags["field"], value,
+
+	if hasInt {
+		var value int64
+		if _, perr := fmt.Sscan(flags["value"], &value); perr != nil {
+			writeJSON(sess, errorResponse{Error: fmt.Sprintf("value must be an integer: %v", perr)})
+			return
+		}
+		if err := repo.UpdateSessionMemberField(
+			flags["session-id"], sc.User.UserID, flags["field"], value,
+		); err != nil {
+			if errors.Is(err, sessions.ErrFieldNotWritable) {
+				writeJSON(sess, errorResponse{Error: "field_not_writable"})
+				return
+			}
+			if errors.Is(err, sessions.ErrNotCreator) {
+				writeJSON(sess, errorResponse{Error: "only the session creator may update members"})
+				return
+			}
+			writeJSON(sess, errorResponse{Error: err.Error()})
+			return
+		}
+		writeJSON(sess, map[string]bool{"ok": true})
+		return
+	}
+
+	// hasText: member-self-write
+	if err := repo.UpdateSessionMemberText(
+		flags["session-id"], sc.User.UserID, flags["field"], flags["text-value"],
 	); err != nil {
 		if errors.Is(err, sessions.ErrFieldNotWritable) {
 			writeJSON(sess, errorResponse{Error: "field_not_writable"})
 			return
 		}
-		if errors.Is(err, sessions.ErrNotCreator) {
-			writeJSON(sess, errorResponse{Error: "only the session creator may update members"})
+		if errors.Is(err, sessions.ErrNotMember) {
+			writeJSON(sess, errorResponse{Error: "caller is not a member of this session"})
 			return
 		}
 		writeJSON(sess, errorResponse{Error: err.Error()})
