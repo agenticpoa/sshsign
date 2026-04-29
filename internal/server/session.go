@@ -107,6 +107,12 @@ func CommandHandler(sess ssh.Session, sc *SessionContext) {
 		handleCheckLease(sess, sc, cmd[1:])
 	case "release-lease":
 		handleReleaseLease(sess, sc, cmd[1:])
+	case "claim-delivery":
+		handleClaimDelivery(sess, sc, cmd[1:])
+	case "get-delivery":
+		handleGetDelivery(sess, sc, cmd[1:])
+	case "list-deliveries":
+		handleListDeliveries(sess, sc, cmd[1:])
 	default:
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("unknown command '%s'", cmd[0])})
 	}

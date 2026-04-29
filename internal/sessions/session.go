@@ -127,6 +127,19 @@ type Lease struct {
 	ExpiresAt  time.Time
 }
 
+// Delivery is a durable idempotency claim for an external side effect,
+// such as posting one Telegram card into a group. The first member to
+// claim (session_id, key) owns that delivery; later callers receive the
+// existing row and must not repeat the side effect.
+type Delivery struct {
+	SessionID   string
+	Key         string
+	Target      string
+	MessageID   string
+	DeliveredBy string
+	DeliveredAt time.Time
+}
+
 // LeaseHeldError exposes the current holder on an ErrLeaseHeld conflict
 // without requiring clients to parse an error string.
 type LeaseHeldError struct {

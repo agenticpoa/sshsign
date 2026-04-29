@@ -1078,6 +1078,132 @@ func (r *Repo) ReleaseLease(
 	return tx.Commit()
 }
 
+// ClaimDelivery atomically claims a durable idempotency key for an
+// external side effect. Returns created=true only for the first caller.
+// Any session member may claim a delivery. Terminal sessions still allow
+// reads through GetDelivery/ListDeliveries, but new claims are rejected
+// so completed/canceled workflows cannot emit fresh side effects.
+func (r *Repo) ClaimDelivery(
+	sessionID, actorUserID, key, target, messageID string,
+) (*Delivery, bool, error) {
+	if sessionID == "" || actorUserID == "" || key == "" {
+		return nil, false, errors.New("session_id, actor_user_id, key required")
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	sess, err := r.getByIDTx(tx, sessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	if sess.Status.IsTerminal() {
+		return nil, false, fmt.Errorf("%w: %s", ErrTerminal, sess.Status)
+	}
+	if err := requireMemberTx(tx, sessionID, actorUserID); err != nil {
+		return nil, false, err
+	}
+
+	now := r.now().UTC()
+	res, err := tx.Exec(
+		`INSERT OR IGNORE INTO signing_session_deliveries
+		   (session_id, delivery_key, target, message_id, delivered_by, delivered_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		sessionID, key, target, messageID, actorUserID, now.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return nil, false, err
+	}
+	rows, _ := res.RowsAffected()
+	created := rows == 1
+	if created {
+		details := fmt.Sprintf(
+			`{"key":%q,"target":%q,"message_id":%q}`,
+			key, target, messageID,
+		)
+		if err := writeAudit(tx, sessionID, "delivery_claimed", actorUserID, details); err != nil {
+			return nil, false, err
+		}
+	}
+
+	delivery, err := getDeliveryTx(tx, sessionID, key)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return delivery, created, nil
+}
+
+// GetDelivery returns one durable delivery claim. Members only.
+func (r *Repo) GetDelivery(sessionID, actorUserID, key string) (*Delivery, error) {
+	if sessionID == "" || actorUserID == "" || key == "" {
+		return nil, errors.New("session_id, actor_user_id, key required")
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := r.getByIDTx(tx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := requireMemberTx(tx, sessionID, actorUserID); err != nil {
+		return nil, err
+	}
+	delivery, err := getDeliveryTx(tx, sessionID, key)
+	if err != nil {
+		return nil, err
+	}
+	return delivery, tx.Commit()
+}
+
+// ListDeliveries returns all delivery claims for a session. Members only.
+func (r *Repo) ListDeliveries(sessionID, actorUserID string) ([]Delivery, error) {
+	if sessionID == "" || actorUserID == "" {
+		return nil, errors.New("session_id, actor_user_id required")
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := r.getByIDTx(tx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := requireMemberTx(tx, sessionID, actorUserID); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(
+		deliverySelectColumns+` FROM signing_session_deliveries
+		 WHERE session_id = ? ORDER BY delivered_at, delivery_key`,
+		sessionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Delivery
+	for rows.Next() {
+		delivery, err := scanDeliveryRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *delivery)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, tx.Commit()
+}
+
 // GetByViewToken fetches a session for public audit rendering. The
 // session_id AND the view_token must match — prevents enumeration of
 // session IDs to discover tokens. Returns ErrNotFound on mismatch (don't
@@ -1223,6 +1349,47 @@ func scanLeaseRow(row rowScanner) (*Lease, error) {
 	l.AcquiredAt, _ = time.Parse(time.RFC3339Nano, acquiredAt)
 	l.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expiresAt)
 	return &l, nil
+}
+
+const deliverySelectColumns = `SELECT session_id, delivery_key, target,
+       message_id, delivered_by, delivered_at`
+
+func getDeliveryTx(tx *sql.Tx, sessionID, key string) (*Delivery, error) {
+	return scanDeliveryRow(tx.QueryRow(
+		deliverySelectColumns+` FROM signing_session_deliveries
+		 WHERE session_id = ? AND delivery_key = ?`,
+		sessionID, key,
+	))
+}
+
+func scanDeliveryRow(row rowScanner) (*Delivery, error) {
+	var d Delivery
+	var deliveredAt string
+	err := row.Scan(
+		&d.SessionID, &d.Key, &d.Target, &d.MessageID, &d.DeliveredBy,
+		&deliveredAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	d.DeliveredAt, _ = time.Parse(time.RFC3339Nano, deliveredAt)
+	return &d, nil
+}
+
+func requireMemberTx(tx *sql.Tx, sessionID, actorUserID string) error {
+	var isMember int
+	err := tx.QueryRow(
+		`SELECT 1 FROM signing_session_members
+		 WHERE session_id = ? AND user_id = ?`,
+		sessionID, actorUserID,
+	).Scan(&isMember)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotMember
+	}
+	return err
 }
 
 func markExpiredTx(tx *sql.Tx, sessionID string, now time.Time) error {

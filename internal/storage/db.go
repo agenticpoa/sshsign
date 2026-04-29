@@ -220,6 +220,18 @@ CREATE TABLE IF NOT EXISTS signing_session_leases (
 
 CREATE INDEX IF NOT EXISTS idx_session_leases_expires ON signing_session_leases(expires_at);
 
+CREATE TABLE IF NOT EXISTS signing_session_deliveries (
+	session_id    TEXT NOT NULL REFERENCES signing_sessions(session_id),
+	delivery_key  TEXT NOT NULL,
+	target        TEXT NOT NULL DEFAULT '',
+	message_id    TEXT NOT NULL DEFAULT '',
+	delivered_by  TEXT NOT NULL REFERENCES users(user_id),
+	delivered_at  TEXT NOT NULL,
+	PRIMARY KEY (session_id, delivery_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_deliveries_session ON signing_session_deliveries(session_id);
+
 -- signing_session_audit: append-only log of session state transitions.
 -- Powers the audit-session command and user-facing audit URLs.
 CREATE TABLE IF NOT EXISTS signing_session_audit (

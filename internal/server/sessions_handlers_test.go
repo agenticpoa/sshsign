@@ -365,6 +365,36 @@ func TestMarshalLease_IncludesFencingToken(t *testing.T) {
 	}
 }
 
+func TestMarshalDelivery_IncludesCreatedForClaims(t *testing.T) {
+	delivery := &sessions.Delivery{
+		SessionID:   "neg_1",
+		Key:         "group:round:0:founder",
+		Target:      "-100123",
+		MessageID:   "77",
+		DeliveredBy: "alice",
+		DeliveredAt: time.Date(2026, 4, 29, 18, 30, 0, 0, time.UTC),
+	}
+
+	out, err := json.Marshal(marshalDelivery(delivery, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(out)
+	for _, want := range []string{
+		`"session_id":"neg_1"`,
+		`"key":"group:round:0:founder"`,
+		`"target":"-100123"`,
+		`"message_id":"77"`,
+		`"delivered_by":"alice"`,
+		`"delivered_at":"2026-04-29T18:30:00Z"`,
+		`"created":true`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("marshalDelivery missing %s in %s", want, body)
+		}
+	}
+}
+
 func TestParseLeaseGenerationRejectsNonPositive(t *testing.T) {
 	for _, raw := range []string{"", "abc", "0", "-1"} {
 		if _, err := parseLeaseGeneration(raw); err == nil {

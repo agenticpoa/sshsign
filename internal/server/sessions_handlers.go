@@ -68,6 +68,16 @@ type leaseView struct {
 	ExpiresAt  string `json:"expires_at"`
 }
 
+type deliveryView struct {
+	SessionID   string `json:"session_id"`
+	Key         string `json:"key"`
+	Target      string `json:"target,omitempty"`
+	MessageID   string `json:"message_id,omitempty"`
+	DeliveredBy string `json:"delivered_by"`
+	DeliveredAt string `json:"delivered_at"`
+	Created     bool   `json:"created,omitempty"`
+}
+
 func marshalLease(lease *sessions.Lease) leaseView {
 	return leaseView{
 		SessionID:  lease.SessionID,
@@ -78,6 +88,18 @@ func marshalLease(lease *sessions.Lease) leaseView {
 		Generation: lease.Generation,
 		AcquiredAt: lease.AcquiredAt.Format(time.RFC3339),
 		ExpiresAt:  lease.ExpiresAt.Format(time.RFC3339),
+	}
+}
+
+func marshalDelivery(delivery *sessions.Delivery, created bool) deliveryView {
+	return deliveryView{
+		SessionID:   delivery.SessionID,
+		Key:         delivery.Key,
+		Target:      delivery.Target,
+		MessageID:   delivery.MessageID,
+		DeliveredBy: delivery.DeliveredBy,
+		DeliveredAt: delivery.DeliveredAt.Format(time.RFC3339),
+		Created:     created,
 	}
 }
 
@@ -488,6 +510,82 @@ func handleReleaseLease(sess ssh.Session, sc *SessionContext, args []string) {
 	writeJSON(sess, map[string]bool{"ok": true})
 }
 
+// handleClaimDelivery: `claim-delivery --session-id ID --key KEY
+// [--target TARGET] [--message-id ID]`.
+//
+// The first member to claim a key gets {"created":true}; later callers
+// receive the existing row with created=false and should suppress the
+// external side effect.
+func handleClaimDelivery(sess ssh.Session, sc *SessionContext, args []string) {
+	flags, err := parseSessionFlags(args)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: err.Error()})
+		return
+	}
+	if flags["session-id"] == "" || flags["key"] == "" {
+		writeJSON(sess, errorResponse{Error: "session-id and key are required"})
+		return
+	}
+
+	repo := sessions.NewRepo(sc.DB)
+	delivery, created, err := repo.ClaimDelivery(
+		flags["session-id"], sc.User.UserID, flags["key"],
+		flags["target"], flags["message-id"],
+	)
+	if err != nil {
+		writeDeliveryError(sess, err)
+		return
+	}
+	writeJSON(sess, marshalDelivery(delivery, created))
+}
+
+// handleGetDelivery: `get-delivery --session-id ID --key KEY`.
+func handleGetDelivery(sess ssh.Session, sc *SessionContext, args []string) {
+	flags, err := parseSessionFlags(args)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: err.Error()})
+		return
+	}
+	if flags["session-id"] == "" || flags["key"] == "" {
+		writeJSON(sess, errorResponse{Error: "session-id and key are required"})
+		return
+	}
+
+	repo := sessions.NewRepo(sc.DB)
+	delivery, err := repo.GetDelivery(flags["session-id"], sc.User.UserID, flags["key"])
+	if err != nil {
+		writeDeliveryError(sess, err)
+		return
+	}
+	writeJSON(sess, marshalDelivery(delivery, false))
+}
+
+// handleListDeliveries: `list-deliveries --session-id ID`.
+func handleListDeliveries(sess ssh.Session, sc *SessionContext, args []string) {
+	flags, err := parseSessionFlags(args)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: err.Error()})
+		return
+	}
+	if flags["session-id"] == "" {
+		writeJSON(sess, errorResponse{Error: "session-id is required"})
+		return
+	}
+
+	repo := sessions.NewRepo(sc.DB)
+	deliveries, err := repo.ListDeliveries(flags["session-id"], sc.User.UserID)
+	if err != nil {
+		writeDeliveryError(sess, err)
+		return
+	}
+	out := make([]deliveryView, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		d := delivery
+		out = append(out, marshalDelivery(&d, false))
+	}
+	writeJSON(sess, out)
+}
+
 func parseLeaseTTL(raw string) (time.Duration, error) {
 	if raw == "" {
 		return 0, nil
@@ -531,6 +629,19 @@ func writeLeaseError(sess ssh.Session, err error) {
 		writeJSON(sess, errorResponse{Error: "not a member of this session"})
 	case errors.Is(err, sessions.ErrNotCreator):
 		writeJSON(sess, errorResponse{Error: "only the session creator may perform this action"})
+	default:
+		writeJSON(sess, errorResponse{Error: err.Error()})
+	}
+}
+
+func writeDeliveryError(sess ssh.Session, err error) {
+	switch {
+	case errors.Is(err, sessions.ErrNotMember):
+		writeJSON(sess, errorResponse{Error: "not a member of this session"})
+	case errors.Is(err, sessions.ErrTerminal):
+		writeJSON(sess, errorResponse{Error: "session is in a terminal state"})
+	case errors.Is(err, sessions.ErrNotFound):
+		writeJSON(sess, errorResponse{Error: "delivery not found"})
 	default:
 		writeJSON(sess, errorResponse{Error: err.Error()})
 	}

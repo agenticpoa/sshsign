@@ -636,6 +636,103 @@ func TestRefreshAndCheckLease_RequireCurrentGeneration(t *testing.T) {
 	}
 }
 
+// ─── Deliveries ──────────────────────────────────────────────────
+
+func TestClaimDelivery_FirstCallerWinsAndDuplicateReturnsExisting(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	now := time.Date(2026, 4, 29, 18, 0, 0, 0, time.UTC)
+	r.now = func() time.Time { return now }
+	sess, _ := r.Create(baseCreate("alice"))
+	_, _ = r.Join(JoinParams{
+		SessionCode: sess.SessionCode, UserID: "bob",
+		Role: "investor", APOAPubkeyPEM: "X",
+	})
+
+	first, created, err := r.ClaimDelivery(
+		sess.SessionID, "alice", "group:round:0:founder", "-1001", "101",
+	)
+	if err != nil {
+		t.Fatalf("ClaimDelivery first: %v", err)
+	}
+	if !created {
+		t.Fatalf("first claim created=false, want true")
+	}
+	if first.DeliveredBy != "alice" || first.Target != "-1001" || first.MessageID != "101" {
+		t.Fatalf("first claim = %+v", first)
+	}
+
+	now = now.Add(time.Minute)
+	second, created, err := r.ClaimDelivery(
+		sess.SessionID, "bob", "group:round:0:founder", "-1001", "202",
+	)
+	if err != nil {
+		t.Fatalf("ClaimDelivery duplicate: %v", err)
+	}
+	if created {
+		t.Fatalf("duplicate claim created=true, want false")
+	}
+	if second.DeliveredBy != "alice" || second.MessageID != "101" {
+		t.Fatalf("duplicate must return original claim, got %+v", second)
+	}
+
+	events, _ := r.Audit(sess.SessionID)
+	claimed := 0
+	for _, e := range events {
+		if e.EventType == "delivery_claimed" {
+			claimed++
+		}
+	}
+	if claimed != 1 {
+		t.Fatalf("delivery_claimed events = %d, want 1", claimed)
+	}
+}
+
+func TestClaimDelivery_RequiresMembership(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+
+	_, _, err := r.ClaimDelivery(sess.SessionID, "charlie", "group:ready", "", "")
+	if !errors.Is(err, ErrNotMember) {
+		t.Fatalf("err = %v, want ErrNotMember", err)
+	}
+}
+
+func TestClaimDelivery_TerminalSessionRejected(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	if _, err := r.Cancel(sess.SessionID, "alice", StatusCanceled); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := r.ClaimDelivery(sess.SessionID, "alice", "group:ready", "", "")
+	if !errors.Is(err, ErrTerminal) {
+		t.Fatalf("err = %v, want ErrTerminal", err)
+	}
+}
+
+func TestListDeliveries_MembersOnly(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	_, _, _ = r.ClaimDelivery(sess.SessionID, "alice", "dm:founder:joined", "alice-dm", "")
+
+	deliveries, err := r.ListDeliveries(sess.SessionID, "alice")
+	if err != nil {
+		t.Fatalf("ListDeliveries: %v", err)
+	}
+	if len(deliveries) != 1 || deliveries[0].Key != "dm:founder:joined" {
+		t.Fatalf("deliveries = %+v", deliveries)
+	}
+
+	_, err = r.ListDeliveries(sess.SessionID, "charlie")
+	if !errors.Is(err, ErrNotMember) {
+		t.Fatalf("err = %v, want ErrNotMember", err)
+	}
+}
+
 func TestCheckLease_ExpiredFails(t *testing.T) {
 	r, _, cleanup := newTestRepo(t)
 	defer cleanup()
