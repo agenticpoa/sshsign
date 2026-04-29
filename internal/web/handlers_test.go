@@ -278,6 +278,29 @@ func TestFormatFieldLabel(t *testing.T) {
 	}
 }
 
+func TestOrderedMetadataKeys(t *testing.T) {
+	metadata := map[string]any{
+		"mfn":              false,
+		"investor_company": "SD Fund",
+		"valuation_cap":    float64(30000000),
+		"founder_name":     "Juan Figuera",
+		"discount_rate":    0.15,
+		"company_name":     "Avocado",
+		"pro_rata":         true,
+		"custom_note":      "hello",
+	}
+
+	parties := orderedMetadataKeys(metadata, true)
+	if got, want := strings.Join(parties, ","), "company_name,founder_name,investor_company"; got != want {
+		t.Fatalf("party order = %q, want %q", got, want)
+	}
+
+	terms := orderedMetadataKeys(metadata, false)
+	if got, want := strings.Join(terms, ","), "valuation_cap,discount_rate,pro_rata,mfn,custom_note"; got != want {
+		t.Fatalf("term order = %q, want %q", got, want)
+	}
+}
+
 func TestFormatIntWithCommas(t *testing.T) {
 	tests := []struct {
 		n        int64

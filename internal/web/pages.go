@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"sort"
 	"strings"
 
 	"github.com/agenticpoa/sshsign/internal/storage"
@@ -16,6 +17,27 @@ var partyFields = map[string]bool{
 	"company_name": true, "party_name": true,
 }
 
+var partyFieldOrder = []string{
+	"company_name",
+	"founder_company",
+	"founder_name",
+	"founder_title",
+	"founder_email",
+	"investor_name",
+	"investor_title",
+	"investor_company",
+	"investor_email",
+	"party_name",
+}
+
+var termFieldOrder = []string{
+	"investment_amount",
+	"valuation_cap",
+	"discount_rate",
+	"pro_rata",
+	"mfn",
+}
+
 func approvalPage(ps *storage.PendingSignature, auth *storage.Authorization) string {
 	// Parse metadata for display
 	var metadata map[string]any
@@ -24,15 +46,18 @@ func approvalPage(ps *storage.PendingSignature, auth *storage.Authorization) str
 	// Split metadata into party info and deal terms
 	var partyInfoHTML strings.Builder
 	var termsHTML strings.Builder
-	for k, v := range metadata {
+	for _, k := range orderedMetadataKeys(metadata, true) {
+		v := metadata[k]
 		label := html.EscapeString(formatFieldLabel(k))
 		value := html.EscapeString(formatTermValue(k, v))
 		row := fmt.Sprintf(`<div class="party"><span class="party-label">%s</span><span class="party-value">%s</span></div>`, label, value)
-		if partyFields[k] {
-			partyInfoHTML.WriteString(row)
-		} else {
-			termsHTML.WriteString(fmt.Sprintf(`<div class="term"><span class="term-label">%s</span><span class="term-value">%s</span></div>`, label, value))
-		}
+		partyInfoHTML.WriteString(row)
+	}
+	for _, k := range orderedMetadataKeys(metadata, false) {
+		v := metadata[k]
+		label := html.EscapeString(formatFieldLabel(k))
+		value := html.EscapeString(formatTermValue(k, v))
+		termsHTML.WriteString(fmt.Sprintf(`<div class="term"><span class="term-label">%s</span><span class="term-value">%s</span></div>`, label, value))
 	}
 
 	// Constraint summary
@@ -277,6 +302,40 @@ async function submitSignature() {
 		constraintsHTML.String())
 }
 
+func orderedMetadataKeys(metadata map[string]any, parties bool) []string {
+	if len(metadata) == 0 {
+		return nil
+	}
+
+	preferred := termFieldOrder
+	if parties {
+		preferred = partyFieldOrder
+	}
+
+	seen := map[string]bool{}
+	keys := make([]string, 0, len(metadata))
+	for _, k := range preferred {
+		if _, ok := metadata[k]; !ok {
+			continue
+		}
+		if partyFields[k] != parties {
+			continue
+		}
+		keys = append(keys, k)
+		seen[k] = true
+	}
+
+	var rest []string
+	for k := range metadata {
+		if seen[k] || partyFields[k] != parties {
+			continue
+		}
+		rest = append(rest, k)
+	}
+	sort.Strings(rest)
+	return append(keys, rest...)
+}
+
 func approvalAlreadyDonePage(status string) string {
 	msg := "This document has already been " + html.EscapeString(status) + "."
 	return fmt.Sprintf(`<!DOCTYPE html>
@@ -296,21 +355,22 @@ func approvalAlreadyDonePage(status string) string {
 
 // knownLabels maps field names to display labels for common acronyms and terms.
 var knownLabels = map[string]string{
-	"mfn":              "Most Favored Nation",
-	"pro_rata":         "Pro-Rata Rights",
-	"valuation_cap":    "Valuation Cap",
-	"discount_rate":    "Discount Rate",
-	"nda_type":         "NDA Type",
-	"term_years":       "Term (Years)",
-	"founder_name":     "Founder",
-	"founder_title":    "Title",
-	"founder_company":  "Company",
-	"founder_email":    "Email",
-	"investor_name":    "Investor",
-	"investor_title":   "Title",
-	"investor_company": "Firm",
-	"investor_email":   "Email",
-	"company_name":     "Company",
+	"mfn":               "Most Favored Nation",
+	"pro_rata":          "Pro-Rata Rights",
+	"valuation_cap":     "Valuation Cap",
+	"discount_rate":     "Discount Rate",
+	"nda_type":          "NDA Type",
+	"term_years":        "Term (Years)",
+	"founder_name":      "Founder",
+	"founder_title":     "Title",
+	"founder_company":   "Company",
+	"founder_email":     "Email",
+	"investor_name":     "Investor",
+	"investor_title":    "Title",
+	"investor_company":  "Firm",
+	"investor_email":    "Email",
+	"company_name":      "Company",
+	"investment_amount": "Investment Amount",
 }
 
 func formatFieldLabel(field string) string {
