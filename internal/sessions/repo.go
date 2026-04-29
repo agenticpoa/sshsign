@@ -27,14 +27,14 @@ func NewRepo(db *sql.DB) *Repo {
 
 // CreateParams groups arguments for creating a new session.
 type CreateParams struct {
-	SessionID        string        // caller supplies — typically reuses an existing neg_XXX id
-	CreatorUserID    string        // resolved sshsign user id (SSH auth truth)
-	CreatorRole      string        // free-form; consumer-specific (founder/investor/party_1/…)
-	CreatorAPOAPub   string        // PEM-encoded APOA pubkey
-	CreatorPartyDID  string        // optional — empty string if consumer doesn't use DIDs
-	TTL              time.Duration // time until session expires; defaults to 24h if zero
-	MetadataPublic   string        // visible to anyone with the code; defaults to "{}"
-	MetadataMember   string        // visible only to members; defaults to "{}"
+	SessionID       string        // caller supplies — typically reuses an existing neg_XXX id
+	CreatorUserID   string        // resolved sshsign user id (SSH auth truth)
+	CreatorRole     string        // free-form; consumer-specific (founder/investor/party_1/…)
+	CreatorAPOAPub  string        // PEM-encoded APOA pubkey
+	CreatorPartyDID string        // optional — empty string if consumer doesn't use DIDs
+	TTL             time.Duration // time until session expires; defaults to 24h if zero
+	MetadataPublic  string        // visible to anyone with the code; defaults to "{}"
+	MetadataMember  string        // visible only to members; defaults to "{}"
 }
 
 // Create inserts a new session + the creator's member row in one
@@ -151,11 +151,11 @@ func (r *Repo) Create(p CreateParams) (*Session, error) {
 
 // JoinParams — inputs for Join.
 type JoinParams struct {
-	SessionCode    string
-	UserID         string
-	Role           string
-	APOAPubkeyPEM  string
-	PartyDID       string
+	SessionCode   string
+	UserID        string
+	Role          string
+	APOAPubkeyPEM string
+	PartyDID      string
 }
 
 // Join adds a member to an existing session, transitioning status to
@@ -651,6 +651,26 @@ func (r *Repo) BindGroup(sessionID, actorUserID string, groupChatID int64) (*Ses
 // Idempotent: calling twice with the same args returns the current
 // state without changing anything.
 func (r *Repo) Complete(sessionID, actorUserID, executedArtifact string) (*Session, error) {
+	return r.complete(sessionID, actorUserID, executedArtifact, "", 0)
+}
+
+// CompleteWithLease transitions a session to 'completed' after validating
+// the creator/finalize lease in the same transaction. The lease holder and
+// generation are fencing tokens: stale workers must fail before finalizing.
+func (r *Repo) CompleteWithLease(
+	sessionID, actorUserID, executedArtifact, leaseHolder string,
+	leaseGeneration int64,
+) (*Session, error) {
+	if leaseHolder == "" || leaseGeneration <= 0 {
+		return nil, errors.New("lease_holder and lease_generation required")
+	}
+	return r.complete(sessionID, actorUserID, executedArtifact, leaseHolder, leaseGeneration)
+}
+
+func (r *Repo) complete(
+	sessionID, actorUserID, executedArtifact, leaseHolder string,
+	leaseGeneration int64,
+) (*Session, error) {
 	if executedArtifact == "" {
 		return nil, errors.New("executed_artifact required")
 	}
@@ -678,6 +698,19 @@ func (r *Repo) Complete(sessionID, actorUserID, executedArtifact string) (*Sessi
 	}
 	if sess.CreatedBy != actorUserID {
 		return nil, ErrNotCreator
+	}
+	if leaseHolder != "" {
+		lease, err := getLeaseTx(tx, sessionID, "creator", "finalize")
+		if err != nil {
+			return nil, err
+		}
+		if lease.OwnerID != actorUserID || lease.Holder != leaseHolder ||
+			lease.Generation != leaseGeneration {
+			return nil, ErrLeaseHolderMismatch
+		}
+		if !r.now().UTC().Before(lease.ExpiresAt) {
+			return nil, ErrLeaseExpired
+		}
 	}
 
 	now := r.now().UTC().Format(time.RFC3339Nano)
@@ -755,6 +788,294 @@ func (r *Repo) IssueViewToken(sessionID, actorUserID string) (*Session, error) {
 		return nil, err
 	}
 	return r.GetByID(sessionID)
+}
+
+func normalizeLeaseTTL(ttl time.Duration) (time.Duration, error) {
+	if ttl == 0 {
+		return DefaultLeaseTTL, nil
+	}
+	if ttl < MinLeaseTTL || ttl > MaxLeaseTTL {
+		return 0, fmt.Errorf("%w: ttl must be between %s and %s",
+			ErrInvalidLeaseTTL, MinLeaseTTL, MaxLeaseTTL)
+	}
+	return ttl, nil
+}
+
+func validateLeaseAction(action string) error {
+	switch action {
+	case "negotiate", "finalize":
+		return nil
+	default:
+		return fmt.Errorf("%w: %q", ErrInvalidLeaseAction, action)
+	}
+}
+
+func (r *Repo) actorCanLeaseTx(
+	tx *sql.Tx,
+	sess *Session,
+	actorUserID, role, action string,
+) error {
+	if action == "finalize" {
+		if sess.CreatedBy != actorUserID {
+			return ErrNotCreator
+		}
+		return nil
+	}
+	var exists int
+	err := tx.QueryRow(
+		`SELECT 1 FROM signing_session_members
+		 WHERE session_id = ? AND user_id = ? AND role = ?`,
+		sess.SessionID, actorUserID, role,
+	).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotMember
+	}
+	return err
+}
+
+// AcquireLease claims or refreshes a short-lived lease for one session action.
+// Expired leases can be stolen; generation increments on steal so stale
+// workers fail later check/refresh calls before irreversible side effects.
+func (r *Repo) AcquireLease(p AcquireLeaseParams) (*Lease, error) {
+	if p.SessionID == "" || p.ActorUserID == "" || p.Role == "" ||
+		p.Action == "" || p.Holder == "" {
+		return nil, errors.New("session_id, actor_user_id, role, action, holder required")
+	}
+	if err := validateLeaseAction(p.Action); err != nil {
+		return nil, err
+	}
+	ttl, err := normalizeLeaseTTL(p.TTL)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	sess, err := r.getByIDTx(tx, p.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if sess.Status.IsTerminal() {
+		return nil, fmt.Errorf("%w: %s", ErrTerminal, sess.Status)
+	}
+	if err := r.actorCanLeaseTx(tx, sess, p.ActorUserID, p.Role, p.Action); err != nil {
+		return nil, err
+	}
+
+	now := r.now().UTC()
+	expiresAt := now.Add(ttl)
+	existing, err := getLeaseTx(tx, p.SessionID, p.Role, p.Action)
+	if err != nil && !errors.Is(err, ErrLeaseNotHeld) {
+		return nil, err
+	}
+
+	eventType := "lease_acquired"
+	if errors.Is(err, ErrLeaseNotHeld) {
+		_, err = tx.Exec(
+			`INSERT INTO signing_session_leases
+			   (session_id, role, action, owner_id, holder, generation, acquired_at, expires_at)
+			 VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+			p.SessionID, p.Role, p.Action, p.ActorUserID, p.Holder,
+			now.Format(time.RFC3339Nano), expiresAt.Format(time.RFC3339Nano),
+		)
+		if err != nil {
+			return nil, err
+		}
+		existing = &Lease{
+			SessionID: p.SessionID, Role: p.Role, Action: p.Action,
+			OwnerID: p.ActorUserID, Holder: p.Holder, Generation: 1,
+			AcquiredAt: now, ExpiresAt: expiresAt,
+		}
+	} else if existing.OwnerID == p.ActorUserID && existing.Holder == p.Holder &&
+		now.Before(existing.ExpiresAt) {
+		_, err = tx.Exec(
+			`UPDATE signing_session_leases
+			 SET expires_at = ?
+			 WHERE session_id = ? AND role = ? AND action = ?`,
+			expiresAt.Format(time.RFC3339Nano), p.SessionID, p.Role, p.Action,
+		)
+		if err != nil {
+			return nil, err
+		}
+		existing.ExpiresAt = expiresAt
+		eventType = ""
+	} else if !now.Before(existing.ExpiresAt) {
+		existing.Generation++
+		existing.OwnerID = p.ActorUserID
+		existing.Holder = p.Holder
+		existing.AcquiredAt = now
+		existing.ExpiresAt = expiresAt
+		_, err = tx.Exec(
+			`UPDATE signing_session_leases
+			 SET owner_id = ?, holder = ?, generation = ?, acquired_at = ?, expires_at = ?
+			 WHERE session_id = ? AND role = ? AND action = ?`,
+			existing.OwnerID, existing.Holder, existing.Generation,
+			existing.AcquiredAt.Format(time.RFC3339Nano),
+			existing.ExpiresAt.Format(time.RFC3339Nano),
+			p.SessionID, p.Role, p.Action,
+		)
+		if err != nil {
+			return nil, err
+		}
+		eventType = "lease_stolen"
+	} else {
+		return nil, &LeaseHeldError{
+			Holder:    existing.Holder,
+			ExpiresAt: existing.ExpiresAt,
+		}
+	}
+
+	if eventType != "" {
+		details := fmt.Sprintf(
+			`{"role":%q,"action":%q,"holder":%q,"generation":%d,"expires_at":%q}`,
+			existing.Role, existing.Action, existing.Holder, existing.Generation,
+			existing.ExpiresAt.Format(time.RFC3339),
+		)
+		if err := writeAudit(tx, existing.SessionID, eventType, p.ActorUserID, details); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return existing, nil
+}
+
+func (r *Repo) CheckLease(
+	sessionID, actorUserID, role, action, holder string,
+	generation int64,
+) (*Lease, error) {
+	if sessionID == "" || actorUserID == "" || role == "" || action == "" ||
+		holder == "" || generation <= 0 {
+		return nil, errors.New("session_id, actor_user_id, role, action, holder, generation required")
+	}
+	if err := validateLeaseAction(action); err != nil {
+		return nil, err
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	sess, err := r.getByIDTx(tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if sess.Status.IsTerminal() {
+		return nil, fmt.Errorf("%w: %s", ErrTerminal, sess.Status)
+	}
+	lease, err := getLeaseTx(tx, sessionID, role, action)
+	if err != nil {
+		return nil, err
+	}
+	if lease.OwnerID != actorUserID || lease.Holder != holder || lease.Generation != generation {
+		return nil, ErrLeaseHolderMismatch
+	}
+	if !r.now().UTC().Before(lease.ExpiresAt) {
+		return nil, ErrLeaseExpired
+	}
+	return lease, tx.Commit()
+}
+
+func (r *Repo) RefreshLease(
+	sessionID, actorUserID, role, action, holder string,
+	generation int64,
+	ttl time.Duration,
+) (*Lease, error) {
+	ttl, err := normalizeLeaseTTL(ttl)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateLeaseAction(action); err != nil {
+		return nil, err
+	}
+	lease, err := r.CheckLease(sessionID, actorUserID, role, action, holder, generation)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	expiresAt := r.now().UTC().Add(ttl)
+	res, err := tx.Exec(
+		`UPDATE signing_session_leases
+		 SET expires_at = ?
+		 WHERE session_id = ? AND role = ? AND action = ?
+		   AND owner_id = ? AND holder = ? AND generation = ?`,
+		expiresAt.Format(time.RFC3339Nano),
+		sessionID, role, action, actorUserID, holder, generation,
+	)
+	if err != nil {
+		return nil, err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return nil, ErrLeaseHolderMismatch
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	lease.ExpiresAt = expiresAt
+	return lease, nil
+}
+
+func (r *Repo) ReleaseLease(
+	sessionID, actorUserID, role, action, holder string,
+	generation int64,
+) error {
+	if sessionID == "" || actorUserID == "" || role == "" || action == "" ||
+		holder == "" || generation <= 0 {
+		return errors.New("session_id, actor_user_id, role, action, holder, generation required")
+	}
+	if err := validateLeaseAction(action); err != nil {
+		return err
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	lease, err := getLeaseTx(tx, sessionID, role, action)
+	if err != nil {
+		return err
+	}
+	if lease.OwnerID != actorUserID || lease.Holder != holder || lease.Generation != generation {
+		return ErrLeaseHolderMismatch
+	}
+	res, err := tx.Exec(
+		`DELETE FROM signing_session_leases
+		 WHERE session_id = ? AND role = ? AND action = ?
+		   AND owner_id = ? AND holder = ? AND generation = ?`,
+		sessionID, role, action, actorUserID, holder, generation,
+	)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrLeaseNotHeld
+	}
+	details := fmt.Sprintf(
+		`{"role":%q,"action":%q,"holder":%q,"generation":%d}`,
+		role, action, holder, generation,
+	)
+	if err := writeAudit(tx, sessionID, "lease_released", actorUserID, details); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // GetByViewToken fetches a session for public audit rendering. The
@@ -873,6 +1194,35 @@ func scanSessionRow(row rowScanner) (*Session, error) {
 	}
 	s.Status = Status(status)
 	return &s, nil
+}
+
+const leaseSelectColumns = `SELECT session_id, role, action, owner_id, holder,
+       generation, acquired_at, expires_at`
+
+func getLeaseTx(tx *sql.Tx, sessionID, role, action string) (*Lease, error) {
+	return scanLeaseRow(tx.QueryRow(
+		leaseSelectColumns+` FROM signing_session_leases
+		 WHERE session_id = ? AND role = ? AND action = ?`,
+		sessionID, role, action,
+	))
+}
+
+func scanLeaseRow(row rowScanner) (*Lease, error) {
+	var l Lease
+	var acquiredAt, expiresAt string
+	err := row.Scan(
+		&l.SessionID, &l.Role, &l.Action, &l.OwnerID, &l.Holder,
+		&l.Generation, &acquiredAt, &expiresAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrLeaseNotHeld
+	}
+	if err != nil {
+		return nil, err
+	}
+	l.AcquiredAt, _ = time.Parse(time.RFC3339Nano, acquiredAt)
+	l.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expiresAt)
+	return &l, nil
 }
 
 func markExpiredTx(tx *sql.Tx, sessionID string, now time.Time) error {

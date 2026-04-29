@@ -99,6 +99,14 @@ func CommandHandler(sess ssh.Session, sc *SessionContext) {
 		handleBindGroup(sess, sc, cmd[1:])
 	case "update-session-member":
 		handleUpdateSessionMember(sess, sc, cmd[1:])
+	case "acquire-lease":
+		handleAcquireLease(sess, sc, cmd[1:])
+	case "refresh-lease":
+		handleRefreshLease(sess, sc, cmd[1:])
+	case "check-lease":
+		handleCheckLease(sess, sc, cmd[1:])
+	case "release-lease":
+		handleReleaseLease(sess, sc, cmd[1:])
 	default:
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("unknown command '%s'", cmd[0])})
 	}

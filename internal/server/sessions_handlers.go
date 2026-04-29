@@ -16,20 +16,20 @@ import (
 // Wire format for SSH-CLI responses. All handlers return JSON.
 
 type sessionView struct {
-	SessionID        string            `json:"session_id"`
-	SessionCode      string            `json:"session_code"`
-	CreatedBy        string            `json:"created_by"`
-	CreatedAt        string            `json:"created_at"`
-	ExpiresAt        string            `json:"expires_at"`
-	Status           string            `json:"status"`
-	CanceledBy       string            `json:"canceled_by,omitempty"`
-	CompletedAt      string            `json:"completed_at,omitempty"`
-	FinalizedBy      string            `json:"finalized_by,omitempty"`
-	ExecutedArtifact string            `json:"executed_artifact,omitempty"`
-	MetadataPublic   string            `json:"metadata_public"`
-	MetadataMember   string            `json:"metadata_member,omitempty"` // omitted for non-members
-	Members          []memberView      `json:"members,omitempty"`         // omitted for non-members
-	GroupChatID      int64             `json:"group_chat_id,omitempty"`   // 0 = unbound
+	SessionID        string       `json:"session_id"`
+	SessionCode      string       `json:"session_code"`
+	CreatedBy        string       `json:"created_by"`
+	CreatedAt        string       `json:"created_at"`
+	ExpiresAt        string       `json:"expires_at"`
+	Status           string       `json:"status"`
+	CanceledBy       string       `json:"canceled_by,omitempty"`
+	CompletedAt      string       `json:"completed_at,omitempty"`
+	FinalizedBy      string       `json:"finalized_by,omitempty"`
+	ExecutedArtifact string       `json:"executed_artifact,omitempty"`
+	MetadataPublic   string       `json:"metadata_public"`
+	MetadataMember   string       `json:"metadata_member,omitempty"` // omitted for non-members
+	Members          []memberView `json:"members,omitempty"`         // omitted for non-members
+	GroupChatID      int64        `json:"group_chat_id,omitempty"`   // 0 = unbound
 }
 
 type memberView struct {
@@ -55,6 +55,30 @@ type auditEventView struct {
 	ActorID   string `json:"actor_id"`
 	Details   string `json:"details"`
 	CreatedAt string `json:"created_at"`
+}
+
+type leaseView struct {
+	SessionID  string `json:"session_id"`
+	Role       string `json:"role"`
+	Action     string `json:"action"`
+	OwnerID    string `json:"owner_id"`
+	Holder     string `json:"holder"`
+	Generation int64  `json:"generation"`
+	AcquiredAt string `json:"acquired_at"`
+	ExpiresAt  string `json:"expires_at"`
+}
+
+func marshalLease(lease *sessions.Lease) leaseView {
+	return leaseView{
+		SessionID:  lease.SessionID,
+		Role:       lease.Role,
+		Action:     lease.Action,
+		OwnerID:    lease.OwnerID,
+		Holder:     lease.Holder,
+		Generation: lease.Generation,
+		AcquiredAt: lease.AcquiredAt.Format(time.RFC3339),
+		ExpiresAt:  lease.ExpiresAt.Format(time.RFC3339),
+	}
 }
 
 // marshalSession shapes the wire response. When `includeMember` is true,
@@ -248,7 +272,9 @@ func handleCancelSession(sess ssh.Session, sc *SessionContext, args []string) {
 }
 
 // handleCompleteSession: `complete-session --session-id ID
-// --executed-artifact URI`. Creator-only; idempotent.
+// --executed-artifact URI --lease-holder HOLDER --lease-generation N`.
+// Creator-only; requires a live creator/finalize lease so stale workers
+// cannot complete a session after another process has taken over.
 func handleCompleteSession(sess ssh.Session, sc *SessionContext, args []string) {
 	flags, err := parseSessionFlags(args)
 	if err != nil {
@@ -259,11 +285,26 @@ func handleCompleteSession(sess ssh.Session, sc *SessionContext, args []string) 
 		writeJSON(sess, errorResponse{Error: "session-id and executed-artifact are required"})
 		return
 	}
+	if flags["lease-holder"] == "" || flags["lease-generation"] == "" {
+		writeJSON(sess, errorResponse{Error: "lease_holder and lease_generation are required"})
+		return
+	}
+	generation, err := parseLeaseGeneration(flags["lease-generation"])
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: "invalid_lease_generation"})
+		return
+	}
 
 	repo := sessions.NewRepo(sc.DB)
-	after, err := repo.Complete(flags["session-id"], sc.User.UserID, flags["executed-artifact"])
+	after, err := repo.CompleteWithLease(
+		flags["session-id"],
+		sc.User.UserID,
+		flags["executed-artifact"],
+		flags["lease-holder"],
+		generation,
+	)
 	if err != nil {
-		writeJSON(sess, errorResponse{Error: err.Error()})
+		writeLeaseError(sess, err)
 		return
 	}
 	members, _ := repo.Members(after.SessionID)
@@ -308,19 +349,206 @@ func handleAuditSession(sess ssh.Session, sc *SessionContext, args []string) {
 	writeJSON(sess, out)
 }
 
+// handleAcquireLease: `acquire-lease --session-id ID --role ROLE
+// --action negotiate|finalize --holder PROCESS_ID [--ttl SECONDS]`.
+func handleAcquireLease(sess ssh.Session, sc *SessionContext, args []string) {
+	flags, err := parseSessionFlags(args)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: err.Error()})
+		return
+	}
+	if flags["session-id"] == "" || flags["role"] == "" ||
+		flags["action"] == "" || flags["holder"] == "" {
+		writeJSON(sess, errorResponse{Error: "session-id, role, action, holder are required"})
+		return
+	}
+	ttl, err := parseLeaseTTL(flags["ttl"])
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: "invalid_lease_ttl"})
+		return
+	}
+
+	repo := sessions.NewRepo(sc.DB)
+	lease, err := repo.AcquireLease(sessions.AcquireLeaseParams{
+		SessionID:   flags["session-id"],
+		ActorUserID: sc.User.UserID,
+		Role:        flags["role"],
+		Action:      flags["action"],
+		Holder:      flags["holder"],
+		TTL:         ttl,
+	})
+	if err != nil {
+		writeLeaseError(sess, err)
+		return
+	}
+	writeJSON(sess, marshalLease(lease))
+}
+
+// handleRefreshLease: `refresh-lease --session-id ID --role ROLE
+// --action negotiate|finalize --holder PROCESS_ID --generation N
+// [--ttl SECONDS]`.
+func handleRefreshLease(sess ssh.Session, sc *SessionContext, args []string) {
+	flags, err := parseSessionFlags(args)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: err.Error()})
+		return
+	}
+	if flags["session-id"] == "" || flags["role"] == "" ||
+		flags["action"] == "" || flags["holder"] == "" || flags["generation"] == "" {
+		writeJSON(sess, errorResponse{
+			Error: "session-id, role, action, holder, generation are required",
+		})
+		return
+	}
+	generation, err := parseLeaseGeneration(flags["generation"])
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: "invalid_lease_generation"})
+		return
+	}
+	ttl, err := parseLeaseTTL(flags["ttl"])
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: "invalid_lease_ttl"})
+		return
+	}
+
+	repo := sessions.NewRepo(sc.DB)
+	lease, err := repo.RefreshLease(
+		flags["session-id"], sc.User.UserID, flags["role"], flags["action"],
+		flags["holder"], generation, ttl,
+	)
+	if err != nil {
+		writeLeaseError(sess, err)
+		return
+	}
+	writeJSON(sess, marshalLease(lease))
+}
+
+// handleCheckLease: `check-lease --session-id ID --role ROLE
+// --action negotiate|finalize --holder PROCESS_ID --generation N`.
+func handleCheckLease(sess ssh.Session, sc *SessionContext, args []string) {
+	flags, err := parseSessionFlags(args)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: err.Error()})
+		return
+	}
+	if flags["session-id"] == "" || flags["role"] == "" ||
+		flags["action"] == "" || flags["holder"] == "" || flags["generation"] == "" {
+		writeJSON(sess, errorResponse{
+			Error: "session-id, role, action, holder, generation are required",
+		})
+		return
+	}
+	generation, err := parseLeaseGeneration(flags["generation"])
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: "invalid_lease_generation"})
+		return
+	}
+
+	repo := sessions.NewRepo(sc.DB)
+	lease, err := repo.CheckLease(
+		flags["session-id"], sc.User.UserID, flags["role"], flags["action"],
+		flags["holder"], generation,
+	)
+	if err != nil {
+		writeLeaseError(sess, err)
+		return
+	}
+	writeJSON(sess, marshalLease(lease))
+}
+
+// handleReleaseLease: `release-lease --session-id ID --role ROLE
+// --action negotiate|finalize --holder PROCESS_ID --generation N`.
+func handleReleaseLease(sess ssh.Session, sc *SessionContext, args []string) {
+	flags, err := parseSessionFlags(args)
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: err.Error()})
+		return
+	}
+	if flags["session-id"] == "" || flags["role"] == "" ||
+		flags["action"] == "" || flags["holder"] == "" || flags["generation"] == "" {
+		writeJSON(sess, errorResponse{
+			Error: "session-id, role, action, holder, generation are required",
+		})
+		return
+	}
+	generation, err := parseLeaseGeneration(flags["generation"])
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: "invalid_lease_generation"})
+		return
+	}
+
+	repo := sessions.NewRepo(sc.DB)
+	if err := repo.ReleaseLease(
+		flags["session-id"], sc.User.UserID, flags["role"], flags["action"],
+		flags["holder"], generation,
+	); err != nil {
+		writeLeaseError(sess, err)
+		return
+	}
+	writeJSON(sess, map[string]bool{"ok": true})
+}
+
+func parseLeaseTTL(raw string) (time.Duration, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	return time.ParseDuration(raw + "s")
+}
+
+func parseLeaseGeneration(raw string) (int64, error) {
+	var generation int64
+	if _, err := fmt.Sscan(raw, &generation); err != nil {
+		return 0, err
+	}
+	if generation <= 0 {
+		return 0, fmt.Errorf("generation must be positive")
+	}
+	return generation, nil
+}
+
+func writeLeaseError(sess ssh.Session, err error) {
+	var held *sessions.LeaseHeldError
+	if errors.As(err, &held) {
+		writeJSON(sess, map[string]string{
+			"error":      "lease_held",
+			"holder":     held.Holder,
+			"expires_at": held.ExpiresAt.Format(time.RFC3339),
+		})
+		return
+	}
+	switch {
+	case errors.Is(err, sessions.ErrLeaseNotHeld):
+		writeJSON(sess, errorResponse{Error: "lease_not_held"})
+	case errors.Is(err, sessions.ErrLeaseHolderMismatch):
+		writeJSON(sess, errorResponse{Error: "lease_holder_mismatch"})
+	case errors.Is(err, sessions.ErrLeaseExpired):
+		writeJSON(sess, errorResponse{Error: "lease_expired"})
+	case errors.Is(err, sessions.ErrInvalidLeaseAction):
+		writeJSON(sess, errorResponse{Error: "invalid_lease_action"})
+	case errors.Is(err, sessions.ErrInvalidLeaseTTL):
+		writeJSON(sess, errorResponse{Error: "invalid_lease_ttl"})
+	case errors.Is(err, sessions.ErrNotMember):
+		writeJSON(sess, errorResponse{Error: "not a member of this session"})
+	case errors.Is(err, sessions.ErrNotCreator):
+		writeJSON(sess, errorResponse{Error: "only the session creator may perform this action"})
+	default:
+		writeJSON(sess, errorResponse{Error: err.Error()})
+	}
+}
+
 // handleUpdateSessionMember: P7-5 RPC + inverted-invitation extension.
 // Two field kinds, each with its own ACL:
 //
-//   --value INT       → integer whitelist (creator-only ACL).
-//                        Today: founder_resumed_at, founder_streaming_at.
-//   --text-value STR  → text whitelist (member-self-write ACL).
-//                        Today: bot_handle.
+//	--value INT       → integer whitelist (creator-only ACL).
+//	                     Today: founder_resumed_at, founder_streaming_at.
+//	--text-value STR  → text whitelist (member-self-write ACL).
+//	                     Today: bot_handle.
 //
 // The repo layer owns enforcement; this handler just parses flags and
 // dispatches to the right repo method based on which value flag is set.
 //
-//   update-session-member --session-id ID --field NAME --value INT
-//   update-session-member --session-id ID --field NAME --text-value STR
+//	update-session-member --session-id ID --field NAME --value INT
+//	update-session-member --session-id ID --field NAME --text-value STR
 func handleUpdateSessionMember(sess ssh.Session, sc *SessionContext, args []string) {
 	flags, err := parseSessionFlags(args)
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/pem"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/agenticpoa/sshsign/internal/sessions"
 )
@@ -329,5 +330,48 @@ func TestMarshalSession_IncludesFounderResumedAndStreamingTimestamps(t *testing.
 	// Investor row has nil pointers → keys must be omitted.
 	if strings.Contains(body, `"role":"investor",.*"founder_resumed_at"`) {
 		t.Errorf("nil pointer should be omitted, not zero-serialized: %s", body)
+	}
+}
+
+func TestMarshalLease_IncludesFencingToken(t *testing.T) {
+	lease := &sessions.Lease{
+		SessionID:  "neg_1",
+		Role:       "founder",
+		Action:     "negotiate",
+		OwnerID:    "alice",
+		Holder:     "host:1234",
+		Generation: 7,
+		AcquiredAt: time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC),
+		ExpiresAt:  time.Date(2026, 4, 22, 10, 2, 0, 0, time.UTC),
+	}
+
+	out, err := json.Marshal(marshalLease(lease))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(out)
+	for _, want := range []string{
+		`"session_id":"neg_1"`,
+		`"role":"founder"`,
+		`"action":"negotiate"`,
+		`"owner_id":"alice"`,
+		`"holder":"host:1234"`,
+		`"generation":7`,
+		`"expires_at":"2026-04-22T10:02:00Z"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("marshalLease missing %s in %s", want, body)
+		}
+	}
+}
+
+func TestParseLeaseGenerationRejectsNonPositive(t *testing.T) {
+	for _, raw := range []string{"", "abc", "0", "-1"} {
+		if _, err := parseLeaseGeneration(raw); err == nil {
+			t.Errorf("parseLeaseGeneration(%q) expected error", raw)
+		}
+	}
+	if got, err := parseLeaseGeneration("42"); err != nil || got != 42 {
+		t.Errorf("parseLeaseGeneration(42) = %d, %v", got, err)
 	}
 }

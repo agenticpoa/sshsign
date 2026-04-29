@@ -407,6 +407,333 @@ func TestComplete_RequiresExecutedArtifact(t *testing.T) {
 	}
 }
 
+func TestCompleteWithLease_RequiresCurrentFinalizeLease(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	lease, err := r.AcquireLease(AcquireLeaseParams{
+		SessionID:   sess.SessionID,
+		ActorUserID: "alice",
+		Role:        "creator",
+		Action:      "finalize",
+		Holder:      "worker-a",
+		TTL:         30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	_, err = r.CompleteWithLease(
+		sess.SessionID, "alice", "sshsign://artifact/123",
+		"worker-b", lease.Generation,
+	)
+	if !errors.Is(err, ErrLeaseHolderMismatch) {
+		t.Fatalf("wrong holder err = %v, want ErrLeaseHolderMismatch", err)
+	}
+
+	after, err := r.CompleteWithLease(
+		sess.SessionID, "alice", "sshsign://artifact/123",
+		lease.Holder, lease.Generation,
+	)
+	if err != nil {
+		t.Fatalf("CompleteWithLease: %v", err)
+	}
+	if after.Status != StatusCompleted || after.ExecutedArtifact != "sshsign://artifact/123" {
+		t.Errorf("after = %+v", after)
+	}
+}
+
+func TestCompleteWithLease_RejectsExpiredLease(t *testing.T) {
+	now := time.Date(2026, 4, 29, 10, 0, 0, 0, time.UTC)
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	r.now = func() time.Time { return now }
+	sess, _ := r.Create(baseCreate("alice"))
+	lease, err := r.AcquireLease(AcquireLeaseParams{
+		SessionID:   sess.SessionID,
+		ActorUserID: "alice",
+		Role:        "creator",
+		Action:      "finalize",
+		Holder:      "worker-a",
+		TTL:         30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	now = lease.ExpiresAt
+	_, err = r.CompleteWithLease(
+		sess.SessionID, "alice", "sshsign://artifact/123",
+		lease.Holder, lease.Generation,
+	)
+	if !errors.Is(err, ErrLeaseExpired) {
+		t.Fatalf("err = %v, want ErrLeaseExpired", err)
+	}
+}
+
+// ─── Leases ───────────────────────────────────────────────────────
+
+func TestAcquireLease_RoleBoundNegotiationLease(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	_, _ = r.Join(JoinParams{
+		SessionCode: sess.SessionCode, UserID: "bob",
+		Role: "investor", APOAPubkeyPEM: "X",
+	})
+
+	_, err := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "bob",
+		Role: "founder", Action: "negotiate", Holder: "worker-b",
+	})
+	if !errors.Is(err, ErrNotMember) {
+		t.Errorf("err = %v, want ErrNotMember for wrong role", err)
+	}
+
+	lease, err := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "bob",
+		Role: "investor", Action: "negotiate", Holder: "worker-b",
+	})
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	if lease.OwnerID != "bob" || lease.Role != "investor" || lease.Action != "negotiate" ||
+		lease.Generation != 1 {
+		t.Errorf("lease = %+v", lease)
+	}
+}
+
+func TestAcquireLease_LiveConflictIncludesHolder(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+
+	_, err := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "alice",
+		Role: "founder", Action: "negotiate", Holder: "worker-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "alice",
+		Role: "founder", Action: "negotiate", Holder: "worker-b",
+	})
+	if !errors.Is(err, ErrLeaseHeld) {
+		t.Fatalf("err = %v, want ErrLeaseHeld", err)
+	}
+	var held *LeaseHeldError
+	if !errors.As(err, &held) || held.Holder != "worker-a" || held.ExpiresAt.IsZero() {
+		t.Errorf("LeaseHeldError = %+v", held)
+	}
+}
+
+func TestAcquireLease_SameHolderRefreshesWithoutAudit(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	now := time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC)
+	r.now = func() time.Time { return now }
+	sess, _ := r.Create(baseCreate("alice"))
+
+	first, err := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "alice",
+		Role: "founder", Action: "negotiate", Holder: "worker-a",
+		TTL: 60 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(10 * time.Second)
+	second, err := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "alice",
+		Role: "founder", Action: "negotiate", Holder: "worker-a",
+		TTL: 60 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Generation != first.Generation || !second.ExpiresAt.After(first.ExpiresAt) {
+		t.Errorf("second = %+v, first = %+v", second, first)
+	}
+	events, _ := r.Audit(sess.SessionID)
+	acquired := 0
+	for _, e := range events {
+		if e.EventType == "lease_acquired" {
+			acquired++
+		}
+	}
+	if acquired != 1 {
+		t.Errorf("lease_acquired events = %d, want 1", acquired)
+	}
+}
+
+func TestAcquireLease_ExpiredLeaseCanBeStolenWithNewGeneration(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	now := time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC)
+	r.now = func() time.Time { return now }
+	sess, _ := r.Create(baseCreate("alice"))
+
+	first, err := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "alice",
+		Role: "founder", Action: "negotiate", Holder: "worker-a",
+		TTL: 15 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = first.ExpiresAt.Add(time.Second)
+	second, err := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "alice",
+		Role: "founder", Action: "negotiate", Holder: "worker-b",
+		TTL: 15 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Generation != first.Generation+1 || second.Holder != "worker-b" {
+		t.Errorf("stolen lease = %+v, first = %+v", second, first)
+	}
+	if _, err := r.CheckLease(
+		sess.SessionID, "alice", "founder", "negotiate", "worker-a", first.Generation,
+	); !errors.Is(err, ErrLeaseHolderMismatch) {
+		t.Errorf("stale check err = %v, want ErrLeaseHolderMismatch", err)
+	}
+}
+
+func TestRefreshAndCheckLease_RequireCurrentGeneration(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	now := time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC)
+	r.now = func() time.Time { return now }
+	sess, _ := r.Create(baseCreate("alice"))
+	lease, _ := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "alice",
+		Role: "founder", Action: "negotiate", Holder: "worker-a",
+		TTL: 15 * time.Second,
+	})
+
+	if _, err := r.CheckLease(
+		sess.SessionID, "alice", "founder", "negotiate", "worker-a", lease.Generation,
+	); err != nil {
+		t.Fatalf("CheckLease: %v", err)
+	}
+	refreshed, err := r.RefreshLease(
+		sess.SessionID, "alice", "founder", "negotiate", "worker-a",
+		lease.Generation, 30*time.Second,
+	)
+	if err != nil {
+		t.Fatalf("RefreshLease: %v", err)
+	}
+	if !refreshed.ExpiresAt.After(lease.ExpiresAt) {
+		t.Errorf("expires_at did not extend: before %v after %v", lease.ExpiresAt, refreshed.ExpiresAt)
+	}
+	if _, err := r.RefreshLease(
+		sess.SessionID, "alice", "founder", "negotiate", "worker-a",
+		lease.Generation+1, 30*time.Second,
+	); !errors.Is(err, ErrLeaseHolderMismatch) {
+		t.Errorf("wrong generation err = %v, want ErrLeaseHolderMismatch", err)
+	}
+}
+
+func TestCheckLease_ExpiredFails(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	now := time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC)
+	r.now = func() time.Time { return now }
+	sess, _ := r.Create(baseCreate("alice"))
+	lease, _ := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "alice",
+		Role: "founder", Action: "negotiate", Holder: "worker-a",
+		TTL: 15 * time.Second,
+	})
+
+	now = lease.ExpiresAt
+	if _, err := r.CheckLease(
+		sess.SessionID, "alice", "founder", "negotiate", "worker-a", lease.Generation,
+	); !errors.Is(err, ErrLeaseExpired) {
+		t.Errorf("err = %v, want ErrLeaseExpired", err)
+	}
+}
+
+func TestReleaseLease_RemovesCurrentLeaseOnly(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	lease, _ := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "alice",
+		Role: "founder", Action: "negotiate", Holder: "worker-a",
+	})
+
+	err := r.ReleaseLease(
+		sess.SessionID, "alice", "founder", "negotiate", "worker-b", lease.Generation,
+	)
+	if !errors.Is(err, ErrLeaseHolderMismatch) {
+		t.Errorf("wrong holder err = %v, want ErrLeaseHolderMismatch", err)
+	}
+	if err := r.ReleaseLease(
+		sess.SessionID, "alice", "founder", "negotiate", "worker-a", lease.Generation,
+	); err != nil {
+		t.Fatalf("ReleaseLease: %v", err)
+	}
+	next, err := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "alice",
+		Role: "founder", Action: "negotiate", Holder: "worker-b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Generation != 1 {
+		t.Errorf("generation after release = %d, want fresh 1", next.Generation)
+	}
+}
+
+func TestAcquireLease_FinalizeIsCreatorOnly(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+	_, _ = r.Join(JoinParams{
+		SessionCode: sess.SessionCode, UserID: "bob",
+		Role: "investor", APOAPubkeyPEM: "X",
+	})
+
+	_, err := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "bob",
+		Role: "founder", Action: "finalize", Holder: "worker-b",
+	})
+	if !errors.Is(err, ErrNotCreator) {
+		t.Errorf("err = %v, want ErrNotCreator", err)
+	}
+	if _, err := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "alice",
+		Role: "founder", Action: "finalize", Holder: "worker-a",
+	}); err != nil {
+		t.Errorf("creator finalize lease: %v", err)
+	}
+}
+
+func TestAcquireLease_RejectsInvalidActionAndTTL(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+
+	_, err := r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "alice",
+		Role: "founder", Action: "archive", Holder: "worker-a",
+	})
+	if !errors.Is(err, ErrInvalidLeaseAction) {
+		t.Errorf("err = %v, want ErrInvalidLeaseAction", err)
+	}
+	_, err = r.AcquireLease(AcquireLeaseParams{
+		SessionID: sess.SessionID, ActorUserID: "alice",
+		Role: "founder", Action: "negotiate", Holder: "worker-a",
+		TTL: time.Second,
+	})
+	if !errors.Is(err, ErrInvalidLeaseTTL) {
+		t.Errorf("err = %v, want ErrInvalidLeaseTTL", err)
+	}
+}
+
 // ─── Gets ─────────────────────────────────────────────────────────
 
 func TestGetByCode_UnknownCode(t *testing.T) {

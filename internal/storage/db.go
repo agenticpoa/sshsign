@@ -206,6 +206,20 @@ CREATE TABLE IF NOT EXISTS signing_session_members (
 
 CREATE INDEX IF NOT EXISTS idx_session_members_user ON signing_session_members(user_id);
 
+CREATE TABLE IF NOT EXISTS signing_session_leases (
+	session_id   TEXT NOT NULL REFERENCES signing_sessions(session_id),
+	role         TEXT NOT NULL,
+	action       TEXT NOT NULL,
+	owner_id     TEXT NOT NULL REFERENCES users(user_id),
+	holder       TEXT NOT NULL,
+	generation   INTEGER NOT NULL DEFAULT 1,
+	acquired_at  TEXT NOT NULL,
+	expires_at   TEXT NOT NULL,
+	PRIMARY KEY (session_id, role, action)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_leases_expires ON signing_session_leases(expires_at);
+
 -- signing_session_audit: append-only log of session state transitions.
 -- Powers the audit-session command and user-facing audit URLs.
 CREATE TABLE IF NOT EXISTS signing_session_audit (
