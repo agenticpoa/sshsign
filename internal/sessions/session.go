@@ -101,6 +101,10 @@ type Member struct {
 	// compose attribution-correct UI (rejection redirects, post-join
 	// create-group card, investor waiting card).
 	BotHandle string
+	// TelegramUserID is the member's own Telegram DM/user id. It is
+	// member-self-written and lets stateless recovery rebuild local
+	// workflow pointers after OpenClaw reaps or loses local files.
+	TelegramUserID string
 }
 
 // AuditEvent is one entry in a session's append-only transition log.

@@ -67,6 +67,11 @@ func Migrate(db *sql.DB) error {
 		// compose attribution-correct UI cards (create-group hint,
 		// rejection redirects, waiting card).
 		`ALTER TABLE signing_session_members ADD COLUMN bot_handle TEXT`,
+		// Telegram recovery: each member's own Telegram DM/user id.
+		// Member self-writes their row so any future workflow turn can
+		// reconstruct local state from sshsign instead of depending on
+		// a tiny local pointer file.
+		`ALTER TABLE signing_session_members ADD COLUMN telegram_user_id TEXT`,
 	}
 	for _, m := range columnMigrations {
 		_, err := db.Exec(m)
@@ -201,6 +206,9 @@ CREATE TABLE IF NOT EXISTS signing_session_members (
 	-- Inverted-invitation: each member's own Telegram bot handle. NULL
 	-- until the member's own bot writes it (member-self-write ACL).
 	bot_handle            TEXT,
+	-- Telegram recovery: member's own DM/user id, self-written by the
+	-- member's bot so local state can be reconstructed from sshsign.
+	telegram_user_id      TEXT,
 	PRIMARY KEY (session_id, user_id)
 );
 

@@ -47,7 +47,8 @@ type memberView struct {
 	// Inverted-invitation: this member's own Telegram bot handle.
 	// Empty string omitted from wire so the OTHER side's consumer
 	// sees a missing field while it's still being written.
-	BotHandle string `json:"bot_handle,omitempty"`
+	BotHandle      string `json:"bot_handle,omitempty"`
+	TelegramUserID string `json:"telegram_user_id,omitempty"`
 }
 
 type auditEventView struct {
@@ -136,6 +137,7 @@ func marshalSession(sess *sessions.Session, members []sessions.Member, includeMe
 				FounderResumedAt:   m.FounderResumedAt,
 				FounderStreamingAt: m.FounderStreamingAt,
 				BotHandle:          m.BotHandle,
+				TelegramUserID:     m.TelegramUserID,
 			})
 		}
 	}

@@ -333,6 +333,28 @@ func TestMarshalSession_IncludesFounderResumedAndStreamingTimestamps(t *testing.
 	}
 }
 
+func TestMarshalSession_IncludesTelegramUserIDWhenSet(t *testing.T) {
+	sess := &sessions.Session{
+		SessionID:   "neg_1",
+		SessionCode: "INV-X",
+		CreatedBy:   "alice",
+		Status:      "joined",
+	}
+	members := []sessions.Member{{
+		Role:           "founder",
+		UserID:         "alice",
+		TelegramUserID: "6413315062",
+	}}
+
+	out, err := json.Marshal(marshalSession(sess, members, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"telegram_user_id":"6413315062"`) {
+		t.Fatalf("telegram_user_id missing: %s", out)
+	}
+}
+
 func TestMarshalLease_IncludesFencingToken(t *testing.T) {
 	lease := &sessions.Lease{
 		SessionID:  "neg_1",

@@ -1179,6 +1179,23 @@ func TestUpdateSessionMemberText_FounderSelfWrites(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionMemberText_TelegramUserIDSelfWrites(t *testing.T) {
+	r, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	sess, _ := r.Create(baseCreate("alice"))
+
+	if err := r.UpdateSessionMemberText(
+		sess.SessionID, "alice", "telegram_user_id", "6413315062",
+	); err != nil {
+		t.Fatalf("UpdateSessionMemberText telegram_user_id: %v", err)
+	}
+
+	members, _ := r.Members(sess.SessionID)
+	if members[0].TelegramUserID != "6413315062" {
+		t.Errorf("TelegramUserID = %q, want 6413315062", members[0].TelegramUserID)
+	}
+}
+
 func TestUpdateSessionMemberText_InvestorSelfWrites(t *testing.T) {
 	r, _, cleanup := newTestRepo(t)
 	defer cleanup()

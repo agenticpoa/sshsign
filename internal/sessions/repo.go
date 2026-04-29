@@ -339,7 +339,8 @@ func (l *GetSessionRateLimiter) Allow(userID string) error {
 func (r *Repo) Members(sessionID string) ([]Member, error) {
 	rows, err := r.db.Query(
 		`SELECT session_id, user_id, role, apoa_pubkey_pem, party_did, joined_at,
-		        founder_resumed_at, founder_streaming_at, bot_handle
+		        founder_resumed_at, founder_streaming_at, bot_handle,
+		        telegram_user_id
 		 FROM signing_session_members WHERE session_id = ? ORDER BY joined_at`,
 		sessionID,
 	)
@@ -353,9 +354,10 @@ func (r *Repo) Members(sessionID string) ([]Member, error) {
 		var m Member
 		var joinedAt string
 		var resumedAt, streamingAt sql.NullInt64
-		var botHandle sql.NullString
+		var botHandle, telegramUserID sql.NullString
 		if err := rows.Scan(&m.SessionID, &m.UserID, &m.Role, &m.APOAPubkeyPEM,
-			&m.PartyDID, &joinedAt, &resumedAt, &streamingAt, &botHandle); err != nil {
+			&m.PartyDID, &joinedAt, &resumedAt, &streamingAt, &botHandle,
+			&telegramUserID); err != nil {
 			return nil, err
 		}
 		m.JoinedAt, _ = time.Parse(time.RFC3339Nano, joinedAt)
@@ -369,6 +371,9 @@ func (r *Repo) Members(sessionID string) ([]Member, error) {
 		}
 		if botHandle.Valid {
 			m.BotHandle = botHandle.String
+		}
+		if telegramUserID.Valid {
+			m.TelegramUserID = telegramUserID.String
 		}
 		out = append(out, m)
 	}
@@ -389,7 +394,8 @@ var updatableMemberFields = map[string]bool{
 // Distinct from the integer field set because the ACL semantics
 // differ (creator-only vs. self-write).
 var updatableMemberTextFields = map[string]bool{
-	"bot_handle": true,
+	"bot_handle":       true,
+	"telegram_user_id": true,
 }
 
 // UpdateSessionMemberField sets a whitelisted integer column on the
