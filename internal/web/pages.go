@@ -14,7 +14,7 @@ import (
 var partyFields = map[string]bool{
 	"founder_name": true, "founder_title": true, "founder_company": true, "founder_email": true,
 	"investor_name": true, "investor_title": true, "investor_company": true, "investor_email": true,
-	"company_name": true, "party_name": true,
+	"investor_firm": true, "company_name": true, "party_name": true,
 }
 
 var partyFieldOrder = []string{
@@ -24,6 +24,7 @@ var partyFieldOrder = []string{
 	"founder_title",
 	"founder_email",
 	"investor_name",
+	"investor_firm",
 	"investor_title",
 	"investor_company",
 	"investor_email",
@@ -327,6 +328,9 @@ func orderedMetadataKeys(metadata map[string]any, parties bool) []string {
 
 	var rest []string
 	for k := range metadata {
+		if strings.HasPrefix(k, "_") {
+			continue
+		}
 		if seen[k] || partyFields[k] != parties {
 			continue
 		}
@@ -362,14 +366,15 @@ var knownLabels = map[string]string{
 	"nda_type":          "NDA Type",
 	"term_years":        "Term (Years)",
 	"founder_name":      "Founder",
-	"founder_title":     "Title",
-	"founder_company":   "Company",
+	"founder_title":     "Founder Title",
+	"founder_company":   "Startup",
 	"founder_email":     "Email",
 	"investor_name":     "Investor",
-	"investor_title":    "Title",
-	"investor_company":  "Firm",
+	"investor_title":    "Investor Title",
+	"investor_company":  "Investor Firm",
+	"investor_firm":     "Investor Firm",
 	"investor_email":    "Email",
-	"company_name":      "Company",
+	"company_name":      "Startup",
 	"investment_amount": "Investment Amount",
 }
 
