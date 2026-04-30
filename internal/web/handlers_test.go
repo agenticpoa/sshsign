@@ -280,15 +280,16 @@ func TestFormatFieldLabel(t *testing.T) {
 
 func TestOrderedMetadataKeys(t *testing.T) {
 	metadata := map[string]any{
-		"mfn":           false,
-		"investor_firm": "SD Fund",
-		"valuation_cap": float64(30000000),
-		"founder_name":  "Juan Figuera",
-		"discount_rate": 0.15,
-		"company_name":  "Avocado",
-		"pro_rata":      true,
-		"custom_note":   "hello",
-		"_signer_role":  "Founder",
+		"mfn":             false,
+		"investor_firm":   "SD Fund",
+		"valuation_cap":   float64(30000000),
+		"founder_name":    "Juan Figuera",
+		"discount_rate":   0.15,
+		"company_name":    "Avocado",
+		"founder_company": "Avocado",
+		"pro_rata":        true,
+		"custom_note":     "hello",
+		"_signer_role":    "Founder",
 	}
 
 	parties := orderedMetadataKeys(metadata, true)

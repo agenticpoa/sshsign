@@ -319,6 +319,9 @@ func orderedMetadataKeys(metadata map[string]any, parties bool) []string {
 		if _, ok := metadata[k]; !ok {
 			continue
 		}
+		if isDuplicatePartyField(metadata, k) {
+			continue
+		}
 		if partyFields[k] != parties {
 			continue
 		}
@@ -331,6 +334,9 @@ func orderedMetadataKeys(metadata map[string]any, parties bool) []string {
 		if strings.HasPrefix(k, "_") {
 			continue
 		}
+		if isDuplicatePartyField(metadata, k) {
+			continue
+		}
 		if seen[k] || partyFields[k] != parties {
 			continue
 		}
@@ -338,6 +344,20 @@ func orderedMetadataKeys(metadata map[string]any, parties bool) []string {
 	}
 	sort.Strings(rest)
 	return append(keys, rest...)
+}
+
+func isDuplicatePartyField(metadata map[string]any, key string) bool {
+	if key != "founder_company" {
+		return false
+	}
+	companyName, ok := metadata["company_name"]
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(
+		strings.TrimSpace(fmt.Sprint(companyName)),
+		strings.TrimSpace(fmt.Sprint(metadata[key])),
+	)
 }
 
 func approvalAlreadyDonePage(status string) string {
