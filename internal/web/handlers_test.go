@@ -252,6 +252,7 @@ func TestFormatTermValue(t *testing.T) {
 		field, expected string
 		value           any
 	}{
+		{"investment_amount", "$300,000", float64(300000)},
 		{"valuation_cap", "$10,000,000", float64(10000000)},
 		{"discount_rate", "20%", float64(0.2)},
 		{"pro_rata", "Yes", true},

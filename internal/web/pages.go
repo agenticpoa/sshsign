@@ -458,7 +458,8 @@ var rateFields = map[string]bool{
 
 // currencyFields are displayed with $ prefix.
 var currencyFields = map[string]bool{
-	"valuation_cap": true,
+	"investment_amount": true,
+	"valuation_cap":     true,
 }
 
 func formatTermValue(field string, v any) string {
