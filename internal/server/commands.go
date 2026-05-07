@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/ssh"
@@ -120,6 +121,39 @@ func approvalDomain(sc *SessionContext) string {
 func writeJSON(sess ssh.Session, v any) {
 	enc := json.NewEncoder(sess)
 	enc.Encode(v)
+}
+
+func hostedSessionID(negotiationID string) string {
+	if strings.HasPrefix(negotiationID, "session_") {
+		return negotiationID
+	}
+	return "session_" + negotiationID
+}
+
+func requireNegotiationMember(sc *SessionContext, negotiationID string) error {
+	repo := sessions.NewRepo(sc.DB)
+	ok, err := repo.IsMember(hostedSessionID(negotiationID), sc.User.UserID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("not a member of this negotiation session")
+	}
+	return nil
+}
+
+func requireNegotiationRoleMember(sc *SessionContext, negotiationID, role string) error {
+	repo := sessions.NewRepo(sc.DB)
+	members, err := repo.Members(hostedSessionID(negotiationID))
+	if err != nil {
+		return err
+	}
+	for _, m := range members {
+		if m.UserID == sc.User.UserID && m.Role == role {
+			return nil
+		}
+	}
+	return fmt.Errorf("not authorized to log offers as %s", role)
 }
 
 // handleSign processes: ssh sign.agenticpoa.com sign --type git-commit [--key-id ak_xxx]
@@ -441,6 +475,11 @@ func handleKeys(sess ssh.Session, sc *SessionContext) {
 // handleCreateKey processes: ssh host create-key --scope <scope> [--tier autonomous|cosign] [--expiry 30] [--constraints '{...}']
 // Generates a new signing key and authorization in one step.
 func handleCreateKey(sess ssh.Session, sc *SessionContext, args []string) {
+	if sc.RateLimits != nil && sc.RateLimits.KeyCreation != nil && !sc.RateLimits.KeyCreation.Allow(sc.User.UserID) {
+		writeJSON(sess, errorResponse{Error: "rate limit exceeded: too many key creation requests"})
+		return
+	}
+
 	var scope, tier, constraintsJSON string
 	var requireSignature bool
 	expiryDays := 30
@@ -482,6 +521,15 @@ func handleCreateKey(sess ssh.Session, sc *SessionContext, args []string) {
 	if tier != "autonomous" && tier != "cosign" {
 		writeJSON(sess, errorResponse{Error: "tier must be 'autonomous' or 'cosign'"})
 		return
+	}
+	if expiryDays < 1 {
+		writeJSON(sess, errorResponse{Error: "expiry must be at least 1 day"})
+		return
+	}
+	if scope == "safe-agreement" && expiryDays > 1 {
+		expiryDays = 1
+	} else if expiryDays > 30 {
+		expiryDays = 30
 	}
 
 	// Parse constraints JSON into metadata constraints.
@@ -1010,6 +1058,11 @@ func handleDeny(sess ssh.Session, sc *SessionContext, args []string) {
 
 // handleLogOffer logs a structured negotiation offer to the audit trail.
 func handleLogOffer(sess ssh.Session, sc *SessionContext, args []string) {
+	if sc.RateLimits != nil && sc.RateLimits.OfferMutation != nil && !sc.RateLimits.OfferMutation.Allow(sc.User.UserID) {
+		writeJSON(sess, errorResponse{Error: "rate limit exceeded: too many offer operations"})
+		return
+	}
+
 	var negotiationID, fromParty, offerType, metadata string
 	var round int
 	var previousTx uint64
@@ -1050,6 +1103,10 @@ func handleLogOffer(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 	if offerType == "" {
 		writeJSON(sess, errorResponse{Error: "missing --type"})
+		return
+	}
+	if err := requireNegotiationRoleMember(sc, negotiationID, fromParty); err != nil {
+		writeJSON(sess, errorResponse{Error: err.Error()})
 		return
 	}
 
@@ -1116,6 +1173,10 @@ func handleHistory(sess ssh.Session, sc *SessionContext, args []string) {
 
 	if negotiationID == "" {
 		writeJSON(sess, errorResponse{Error: "missing --negotiation-id"})
+		return
+	}
+	if err := requireNegotiationMember(sc, negotiationID); err != nil {
+		writeJSON(sess, errorResponse{Error: err.Error()})
 		return
 	}
 

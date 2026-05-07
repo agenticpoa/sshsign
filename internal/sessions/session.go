@@ -173,7 +173,7 @@ type AcquireLeaseParams struct {
 // legitimate user hits them. Exposed as constants so ops can tune via
 // recompile if needed; env-var tunables can come later.
 const (
-	MaxOpenSessionsPerUser    = 50
+	MaxOpenSessionsPerUser    = 10
 	MaxGetSessionCallsPerHour = 1000
 	MaxCodeGenerationRetries  = 10
 	DefaultLeaseTTL           = 120 * time.Second

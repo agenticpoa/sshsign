@@ -73,12 +73,19 @@ type ServerRateLimits struct {
 	AuthFailures *RateLimiter
 	// Per-key signing rate limiting (100/hour = ~0.028/sec)
 	SigningRequests *RateLimiter
+	// Per-key provisioning/session/offer limits for hosted demo safety.
+	KeyCreation     *RateLimiter
+	SessionMutation *RateLimiter
+	OfferMutation   *RateLimiter
 }
 
 func NewServerRateLimits() *ServerRateLimits {
 	return &ServerRateLimits{
-		Connections:    NewRateLimiter(10.0/60.0, 10),     // 10/min, burst 10
-		AuthFailures:   NewRateLimiter(5.0/60.0, 5),       // 5/min, burst 5
-		SigningRequests: NewRateLimiter(100.0/3600.0, 10),  // 100/hour, burst 10
+		Connections:     NewRateLimiter(10.0/60.0, 10),    // 10/min, burst 10
+		AuthFailures:    NewRateLimiter(5.0/60.0, 5),      // 5/min, burst 5
+		SigningRequests: NewRateLimiter(100.0/3600.0, 10), // 100/hour, burst 10
+		KeyCreation:     NewRateLimiter(40.0/3600.0, 8),   // 40/hour, burst 8
+		SessionMutation: NewRateLimiter(120.0/3600.0, 12), // 120/hour, burst 12
+		OfferMutation:   NewRateLimiter(240.0/3600.0, 20), // 240/hour, burst 20
 	}
 }

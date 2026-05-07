@@ -5,13 +5,44 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	gossh "golang.org/x/crypto/ssh"
 )
+
+func setupNegotiationMembers(t *testing.T, ts *testServer, signer gossh.Signer, negotiationID string) gossh.Signer {
+	t.Helper()
+	out, _ := sshClient(t, ts.addr, signer, `create-session --session-id session_`+negotiationID+` --role founder --apoa-pubkey test-founder-pub`)
+	var created struct {
+		SessionCode string `json:"session_code"`
+		Error       string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &created); err != nil {
+		t.Fatalf("parsing create-session response: %v\nraw: %s", err, out)
+	}
+	if created.Error != "" {
+		t.Fatalf("create-session failed: %s", created.Error)
+	}
+	investorSigner, _ := generateTestSSHKey(t)
+	sshClient(t, ts.addr, investorSigner, "")
+	out, _ = sshClient(t, ts.addr, investorSigner, `join-session --session-code `+created.SessionCode+` --role investor --apoa-pubkey test-investor-pub`)
+	var joined struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &joined); err != nil {
+		t.Fatalf("parsing join-session response: %v\nraw: %s", err, out)
+	}
+	if joined.Error != "" {
+		t.Fatalf("join-session failed: %s", joined.Error)
+	}
+	return investorSigner
+}
 
 func TestLogOffer_SequenceAndChain(t *testing.T) {
 	ts := setupTestServer(t)
 
 	signer, _ := generateTestSSHKey(t)
 	sshClient(t, ts.addr, signer, "") // create user
+	investorSigner := setupNegotiationMembers(t, ts, signer, "neg_test1")
 
 	// Offer 1: founder initial offer
 	cmd1 := `log-offer --negotiation-id neg_test1 --round 1 --from founder --type offer --metadata {"valuation_cap":12000000,"discount_rate":0.20} --previous-tx 0`
@@ -35,7 +66,7 @@ func TestLogOffer_SequenceAndChain(t *testing.T) {
 
 	// Offer 2: investor counter, chained to offer 1
 	cmd2 := `log-offer --negotiation-id neg_test1 --round 1 --from investor --type counter --metadata {"valuation_cap":6000000,"discount_rate":0.15} --previous-tx ` + itoa(tx1)
-	out2, _ := sshClient(t, ts.addr, signer, cmd2)
+	out2, _ := sshClient(t, ts.addr, investorSigner, cmd2)
 
 	var resp2 struct {
 		ImmudbTx uint64 `json:"immudb_tx"`
@@ -56,7 +87,7 @@ func TestLogOffer_SequenceAndChain(t *testing.T) {
 
 	// Offer 4: investor accept
 	cmd4 := `log-offer --negotiation-id neg_test1 --round 2 --from investor --type accept --metadata {"valuation_cap":9000000,"discount_rate":0.18} --previous-tx ` + itoa(tx3)
-	out4, _ := sshClient(t, ts.addr, signer, cmd4)
+	out4, _ := sshClient(t, ts.addr, investorSigner, cmd4)
 
 	var resp4 struct {
 		ImmudbTx uint64 `json:"immudb_tx"`
@@ -74,10 +105,11 @@ func TestHistory_ReturnsAllOffersInOrder(t *testing.T) {
 
 	signer, _ := generateTestSSHKey(t)
 	sshClient(t, ts.addr, signer, "")
+	investorSigner := setupNegotiationMembers(t, ts, signer, "neg_hist")
 
 	// Log 3 offers
 	sshClient(t, ts.addr, signer, `log-offer --negotiation-id neg_hist --round 1 --from founder --type offer --metadata {"cap":12000000} --previous-tx 0`)
-	out2, _ := sshClient(t, ts.addr, signer, `log-offer --negotiation-id neg_hist --round 1 --from investor --type counter --metadata {"cap":8000000} --previous-tx 1`)
+	out2, _ := sshClient(t, ts.addr, investorSigner, `log-offer --negotiation-id neg_hist --round 1 --from investor --type counter --metadata {"cap":8000000} --previous-tx 1`)
 	var r2 struct {
 		ImmudbTx uint64 `json:"immudb_tx"`
 	}
@@ -119,22 +151,31 @@ func TestHistory_ChainIntegrity(t *testing.T) {
 
 	signer, _ := generateTestSSHKey(t)
 	sshClient(t, ts.addr, signer, "")
+	investorSigner := setupNegotiationMembers(t, ts, signer, "neg_chain")
 
 	// Log a chain of 4 offers
 	out1, _ := sshClient(t, ts.addr, signer, `log-offer --negotiation-id neg_chain --round 1 --from founder --type offer --metadata {} --previous-tx 0`)
-	var r1 struct{ ImmudbTx uint64 `json:"immudb_tx"` }
+	var r1 struct {
+		ImmudbTx uint64 `json:"immudb_tx"`
+	}
 	json.Unmarshal([]byte(out1), &r1)
 
-	out2, _ := sshClient(t, ts.addr, signer, `log-offer --negotiation-id neg_chain --round 1 --from investor --type counter --metadata {} --previous-tx `+itoa(r1.ImmudbTx))
-	var r2 struct{ ImmudbTx uint64 `json:"immudb_tx"` }
+	out2, _ := sshClient(t, ts.addr, investorSigner, `log-offer --negotiation-id neg_chain --round 1 --from investor --type counter --metadata {} --previous-tx `+itoa(r1.ImmudbTx))
+	var r2 struct {
+		ImmudbTx uint64 `json:"immudb_tx"`
+	}
 	json.Unmarshal([]byte(out2), &r2)
 
 	out3, _ := sshClient(t, ts.addr, signer, `log-offer --negotiation-id neg_chain --round 2 --from founder --type counter --metadata {} --previous-tx `+itoa(r2.ImmudbTx))
-	var r3 struct{ ImmudbTx uint64 `json:"immudb_tx"` }
+	var r3 struct {
+		ImmudbTx uint64 `json:"immudb_tx"`
+	}
 	json.Unmarshal([]byte(out3), &r3)
 
-	out4, _ := sshClient(t, ts.addr, signer, `log-offer --negotiation-id neg_chain --round 2 --from investor --type accept --metadata {} --previous-tx `+itoa(r3.ImmudbTx))
-	var r4 struct{ ImmudbTx uint64 `json:"immudb_tx"` }
+	out4, _ := sshClient(t, ts.addr, investorSigner, `log-offer --negotiation-id neg_chain --round 2 --from investor --type accept --metadata {} --previous-tx `+itoa(r3.ImmudbTx))
+	var r4 struct {
+		ImmudbTx uint64 `json:"immudb_tx"`
+	}
 	json.Unmarshal([]byte(out4), &r4)
 
 	// Query and verify chain
@@ -168,6 +209,7 @@ func TestLogOffer_NonExistentPreviousTx(t *testing.T) {
 
 	signer, _ := generateTestSSHKey(t)
 	sshClient(t, ts.addr, signer, "")
+	_ = setupNegotiationMembers(t, ts, signer, "neg_bad")
 
 	// Try to chain to a non-existent tx
 	out, _ := sshClient(t, ts.addr, signer, `log-offer --negotiation-id neg_bad --round 1 --from founder --type offer --metadata {} --previous-tx 99999`)
