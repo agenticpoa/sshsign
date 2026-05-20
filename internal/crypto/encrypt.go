@@ -143,6 +143,16 @@ func (r *KEKRing) CurrentAlgo() string {
 	return r.currentAlgo
 }
 
+// CurrentKEKMaterial returns a copy of the current KEK for use as input
+// to HKDF derivations outside this package (e.g., audit chain keys).
+// Returning a copy prevents callers from mutating the ring's internal
+// key by accident.
+func (r *KEKRing) CurrentKEKMaterial() []byte {
+	out := make([]byte, len(r.current))
+	copy(out, r.current)
+	return out
+}
+
 func (r *KEKRing) kekFor(algo string) ([]byte, error) {
 	switch algo {
 	case KEKAlgoLegacy:

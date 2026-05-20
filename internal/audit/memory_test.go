@@ -144,3 +144,112 @@ func TestMemoryLogger_SequentialTxIDs(t *testing.T) {
 		t.Errorf("tx IDs should be sequential: %d, %d, %d", tx1, tx2, tx3)
 	}
 }
+
+func TestMemoryLogger_ChainVerifies(t *testing.T) {
+	l := audit.NewMemoryLogger()
+	for i := 0; i < 5; i++ {
+		_, err := l.Log(audit.Entry{
+			ActionType:  "git-commit",
+			Result:      "SIGNED",
+			PayloadHash: string(rune('a' + i)),
+		})
+		if err != nil {
+			t.Fatalf("logging entry %d: %v", i, err)
+		}
+	}
+	if err := l.VerifyChain(); err != nil {
+		t.Errorf("VerifyChain on untampered log: %v", err)
+	}
+}
+
+func TestMemoryLogger_ChainDetectsModifiedEntry(t *testing.T) {
+	l := audit.NewMemoryLogger()
+	tx, _ := l.Log(audit.Entry{
+		ActionType: "git-commit", Result: "SIGNED", PayloadHash: "real",
+	})
+	_, _ = l.Log(audit.Entry{ActionType: "git-commit", Result: "SIGNED", PayloadHash: "b"})
+
+	// Tamper with the first entry's payload_hash by writing back a
+	// modified marshaled blob. The recomputed EntryHash will no longer
+	// match what's stored.
+	key := audit.EntryKey("git-commit", tx)
+	got, err := l.Get(key)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	got.PayloadHash = "tampered"
+	data, _ := audit.MarshalEntry(*got)
+	audit.RewriteEntryForTest(l, key, data)
+
+	if err := l.VerifyChain(); err == nil {
+		t.Error("VerifyChain accepted a modified entry")
+	}
+}
+
+func TestMemoryLogger_ChainDetectsDeletedEntry(t *testing.T) {
+	l := audit.NewMemoryLogger()
+	_, _ = l.Log(audit.Entry{ActionType: "git-commit", Result: "SIGNED", PayloadHash: "a"})
+	tx2, _ := l.Log(audit.Entry{ActionType: "git-commit", Result: "SIGNED", PayloadHash: "b"})
+	_, _ = l.Log(audit.Entry{ActionType: "git-commit", Result: "SIGNED", PayloadHash: "c"})
+
+	audit.DeleteEntryForTest(l, audit.EntryKey("git-commit", tx2))
+
+	if err := l.VerifyChain(); err == nil {
+		t.Error("VerifyChain accepted a chain with a missing entry")
+	}
+}
+
+func TestMemoryLogger_VerifySingleEntryDetectsTamper(t *testing.T) {
+	l := audit.NewMemoryLogger()
+	tx, _ := l.Log(audit.Entry{
+		ActionType: "git-commit", Result: "SIGNED", PayloadHash: "real",
+	})
+	key := audit.EntryKey("git-commit", tx)
+
+	ok, err := l.Verify(key)
+	if err != nil {
+		t.Fatalf("verify clean: %v", err)
+	}
+	if !ok {
+		t.Fatal("clean entry should verify")
+	}
+
+	got, _ := l.Get(key)
+	got.Result = "DENIED"
+	data, _ := audit.MarshalEntry(*got)
+	audit.RewriteEntryForTest(l, key, data)
+
+	ok, _ = l.Verify(key)
+	if ok {
+		t.Error("Verify accepted a tampered entry")
+	}
+}
+
+func TestMemoryLogger_ChainSurvivesRestartWithSameKey(t *testing.T) {
+	// Two loggers built with the same chain key produce verifiable
+	// chains across the boundary — proving the chain ties to the key
+	// material, not to a per-instance random value.
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	l1 := audit.NewMemoryLoggerWithChainKey(key)
+	tx, _ := l1.Log(audit.Entry{ActionType: "git-commit", Result: "SIGNED", PayloadHash: "x"})
+
+	// Reconstruct a second logger with the same key; re-verifying the
+	// first logger's entry uses the same HMAC, so it must succeed.
+	l2 := audit.NewMemoryLoggerWithChainKey(key)
+	entry, err := l1.Get(audit.EntryKey("git-commit", tx))
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	// Stuff the entry into l2 at its original key so VerifyChain has
+	// something to walk.
+	data, _ := audit.MarshalEntry(*entry)
+	audit.RewriteEntryForTest(l2, audit.EntryKey("git-commit", tx), data)
+	audit.BumpTxSeqForTest(l2, tx)
+
+	if err := l2.VerifyChain(); err != nil {
+		t.Errorf("VerifyChain across logger boundary failed: %v", err)
+	}
+}

@@ -1,12 +1,55 @@
 package audit
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"time"
+
+	"golang.org/x/crypto/hkdf"
 )
 
+// ChainKeyInfo is the HKDF info string for deriving an audit-chain HMAC
+// key from a server secret. Versioned so a key rotation is a single
+// constant edit; existing chains would fail verification afterward.
+const ChainKeyInfo = "sshsign-audit-chain-v1"
+
+// DeriveChainKey returns the HMAC-SHA256 key that should be threaded
+// into MemoryLogger so the chain survives restarts under the same
+// server secret. Derived via HKDF-Expand from the caller's existing
+// key material (e.g., the current KEK) so we don't introduce a new
+// secret to manage.
+func DeriveChainKey(material []byte) []byte {
+	out := make([]byte, 32)
+	h := hkdf.Expand(sha256.New, material, []byte(ChainKeyInfo))
+	_, _ = io.ReadFull(h, out)
+	return out
+}
+
+// computeEntryHash returns HMAC-SHA256 of the entry's canonical JSON
+// form (with EntryHash blanked) keyed by chainKey. Used by both the
+// writer (to fill EntryHash on insert) and the verifier (to recompute
+// and constant-time-compare on read).
+func computeEntryHash(chainKey []byte, e Entry) (string, error) {
+	e.EntryHash = ""
+	canonical, err := json.Marshal(e)
+	if err != nil {
+		return "", fmt.Errorf("marshaling for chain hash: %w", err)
+	}
+	mac := hmac.New(sha256.New, chainKey)
+	mac.Write(canonical)
+	return hex.EncodeToString(mac.Sum(nil)), nil
+}
+
 // Entry represents an immutable audit log entry.
+//
+// PrevHash and EntryHash form a hash chain: each entry's EntryHash is
+// HMAC-SHA256 over the entry's canonical JSON (with EntryHash blanked)
+// keyed by the logger's chain key. Modifying or deleting any entry
+// breaks every chain pointer that follows it. See [MemoryLogger.VerifyChain].
 type Entry struct {
 	TxID               uint64    `json:"tx_id"`
 	Timestamp          time.Time `json:"timestamp"`
@@ -20,6 +63,8 @@ type Entry struct {
 	Result             string    `json:"result"` // "SIGNED" | "DENIED" | "REVOKED"
 	DenialReason       string    `json:"denial_reason,omitempty"`
 	Signature          string    `json:"signature,omitempty"`
+	PrevHash           string    `json:"prev_hash,omitempty"`  // hex EntryHash of the previous entry, "" at genesis
+	EntryHash          string    `json:"entry_hash,omitempty"` // hex HMAC of this entry's canonical form
 }
 
 // Logger defines the interface for the immutable audit log.

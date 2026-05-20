@@ -42,7 +42,12 @@ func main() {
 		log.Fatalf("building KEK ring: %v", err)
 	}
 
-	// Set up audit logger: immudb if configured, otherwise in-memory
+	// Set up audit logger: immudb if configured, otherwise in-memory.
+	// The in-memory logger gets a chain key derived from the KEK so
+	// VerifyChain survives restarts under the same server secret.
+	// ImmuDB has its own tamper-evidence via Merkle proofs, so the
+	// chain key only matters for the memory logger.
+	auditChainKey := audit.DeriveChainKey(kek.CurrentKEKMaterial())
 	var auditLog audit.Logger
 	if addr := os.Getenv("SSHSIGN_IMMUDB_ADDRESS"); addr != "" {
 		port := 3322
@@ -67,7 +72,7 @@ func main() {
 		auditLog = immuLogger
 		log.Printf("audit logging to immudb at %s:%d", addr, port)
 	} else {
-		auditLog = audit.NewMemoryLogger()
+		auditLog = audit.NewMemoryLoggerWithChainKey(auditChainKey)
 		log.Println("audit logging to memory (set SSHSIGN_IMMUDB_ADDRESS for production)")
 	}
 
