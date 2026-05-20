@@ -151,7 +151,7 @@ func (m Model) handleCreateKey() (tea.Model, tea.Cmd) {
 	}
 	crypto.ZeroBytes(priv)
 
-	wrappedDEK, err := crypto.WrapDEK(dek, m.kek)
+	wrappedDEK, kekAlgo, err := m.kek.WrapDEK(dek)
 	if err != nil {
 		m.welcome.status = fmt.Sprintf("Error wrapping DEK: %v", err)
 		m.welcome.isError = true
@@ -159,7 +159,7 @@ func (m Model) handleCreateKey() (tea.Model, tea.Cmd) {
 	}
 
 	keyID := storage.NewKeyID()
-	m.authSetup = newAuthSetupModelForPendingKey(m.db, m.user, keyID, pubSSH, encPrivKey, wrappedDEK, m.r)
+	m.authSetup = newAuthSetupModelForPendingKey(m.db, m.user, keyID, pubSSH, encPrivKey, wrappedDEK, kekAlgo, m.r)
 	m.screen = screenAuthSetup
 	return m, nil
 }

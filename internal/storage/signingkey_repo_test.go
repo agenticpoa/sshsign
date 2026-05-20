@@ -17,7 +17,7 @@ func TestCreateAndGetSigningKey(t *testing.T) {
 	encPrivKey := []byte("encrypted-private-key-data")
 	encDEK := []byte("encrypted-dek-data")
 
-	sk, err := storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAAsigning", encPrivKey, encDEK)
+	sk, err := storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAAsigning", encPrivKey, encDEK, "")
 	if err != nil {
 		t.Fatalf("creating signing key: %v", err)
 	}
@@ -56,12 +56,12 @@ func TestListSigningKeys(t *testing.T) {
 		t.Fatalf("creating user: %v", err)
 	}
 
-	_, err = storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAA1", []byte("enc1"), []byte("dek1"))
+	_, err = storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAA1", []byte("enc1"), []byte("dek1"), "")
 	if err != nil {
 		t.Fatalf("creating first key: %v", err)
 	}
 
-	_, err = storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAA2", []byte("enc2"), []byte("dek2"))
+	_, err = storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAA2", []byte("enc2"), []byte("dek2"), "")
 	if err != nil {
 		t.Fatalf("creating second key: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestRevokeSigningKey(t *testing.T) {
 		t.Fatalf("creating user: %v", err)
 	}
 
-	sk, err := storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAArevoke", []byte("enc"), []byte("dek"))
+	sk, err := storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAArevoke", []byte("enc"), []byte("dek"), "")
 	if err != nil {
 		t.Fatalf("creating signing key: %v", err)
 	}

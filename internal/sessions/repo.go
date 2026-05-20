@@ -2,6 +2,7 @@ package sessions
 
 import (
 	cryptoRand "crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"errors"
@@ -1228,10 +1229,7 @@ func (r *Repo) GetByViewToken(sessionID, viewToken string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Constant-time compare would be strictly more principled, but the
-	// attacker's leverage here is limited: tokens are high-entropy and
-	// rate-limited at the HTTP layer. Standard comparison is fine.
-	if sess.ViewToken == "" || sess.ViewToken != viewToken {
+	if sess.ViewToken == "" || subtle.ConstantTimeCompare([]byte(sess.ViewToken), []byte(viewToken)) != 1 {
 		return nil, ErrNotFound
 	}
 	return sess, tx.Commit()

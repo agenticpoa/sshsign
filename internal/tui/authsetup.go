@@ -53,6 +53,7 @@ type authSetupModel struct {
 	pendingPubSSH     string
 	pendingEncPriv    []byte
 	pendingWrappedDEK []byte
+	pendingKEKAlgo    string // algorithm tag matching pendingWrappedDEK
 
 	// Template state
 	selectedTemplate *authTemplate
@@ -199,7 +200,7 @@ func newAuthSetupModelForKey(db *sql.DB, user *storage.User, keyID string, r *li
 	return m
 }
 
-func newAuthSetupModelForPendingKey(db *sql.DB, user *storage.User, keyID, pubSSH string, encPriv, wrappedDEK []byte, r *lipgloss.Renderer) authSetupModel {
+func newAuthSetupModelForPendingKey(db *sql.DB, user *storage.User, keyID, pubSSH string, encPriv, wrappedDEK []byte, kekAlgo string, r *lipgloss.Renderer) authSetupModel {
 	m := newAuthSetupModel(db, user, r)
 	m.selectedKeyID = keyID
 	m.step = stepSelectTemplate
@@ -207,6 +208,7 @@ func newAuthSetupModelForPendingKey(db *sql.DB, user *storage.User, keyID, pubSS
 	m.pendingPubSSH = pubSSH
 	m.pendingEncPriv = encPriv
 	m.pendingWrappedDEK = wrappedDEK
+	m.pendingKEKAlgo = kekAlgo
 	return m
 }
 
@@ -1103,6 +1105,7 @@ func (m Model) handleCreateAuth() (tea.Model, tea.Cmd) {
 		_, err := storage.CreateSigningKeyWithID(
 			m.authSetup.db, m.authSetup.selectedKeyID, m.authSetup.user.UserID,
 			m.authSetup.pendingPubSSH, m.authSetup.pendingEncPriv, m.authSetup.pendingWrappedDEK,
+			m.authSetup.pendingKEKAlgo,
 		)
 		if err != nil {
 			m.authSetup.status = fmt.Sprintf("Error storing key: %v", err)
@@ -1112,6 +1115,7 @@ func (m Model) handleCreateAuth() (tea.Model, tea.Cmd) {
 		m.authSetup.pendingPubSSH = ""
 		m.authSetup.pendingEncPriv = nil
 		m.authSetup.pendingWrappedDEK = nil
+		m.authSetup.pendingKEKAlgo = ""
 	}
 
 	expires := time.Now().AddDate(0, 0, m.authSetup.expiryDays)

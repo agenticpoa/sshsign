@@ -19,7 +19,7 @@ import (
 type testServer struct {
 	addr     string
 	db       *storage.TestDB
-	kek      []byte
+	kek      *apoacrypto.KEKRing
 	auditLog *audit.MemoryLogger
 }
 
@@ -31,9 +31,9 @@ func setupTestServer(t *testing.T) *testServer {
 		t.Fatalf("creating test db: %v", err)
 	}
 
-	kek, err := apoacrypto.DeriveKEK("test-secret")
+	kek, err := apoacrypto.NewKEKRingForTests("test-secret")
 	if err != nil {
-		t.Fatalf("deriving KEK: %v", err)
+		t.Fatalf("building KEK ring: %v", err)
 	}
 
 	// Find a free port

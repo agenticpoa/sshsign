@@ -13,7 +13,7 @@ func setupUserAndKey(t *testing.T, tdb *storage.TestDB) (*storage.User, *storage
 	if err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
-	sk, err := storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAAsig", []byte("enc"), []byte("dek"))
+	sk, err := storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAAsig", []byte("enc"), []byte("dek"), "")
 	if err != nil {
 		t.Fatalf("creating signing key: %v", err)
 	}

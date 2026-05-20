@@ -19,9 +19,16 @@ import (
 var pendingIDPattern = regexp.MustCompile(`^pnd_[0-9a-f]{12}$`)
 
 const (
-	maxImageSize     = 500 * 1024    // 500KB
+	maxImageSize     = 500 * 1024     // 500KB
 	approvalTokenTTL = 24 * time.Hour // approval URLs expire after 24 hours
 )
+
+// approvalTokenMatches verifies the URL-presented token against the
+// verifier persisted in pending_signatures. Wraps the crypto helper so
+// handlers stay readable.
+func approvalTokenMatches(stored, presented string) bool {
+	return apoacrypto.VerifyApprovalToken(stored, presented)
+}
 
 // handleGetApproval renders the signature capture page.
 func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +46,7 @@ func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if ps.ApprovalToken == "" || ps.ApprovalToken != token {
+	if !approvalTokenMatches(ps.ApprovalToken, token) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -90,7 +97,7 @@ func (s *Server) handlePostApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if ps.ApprovalToken == "" || ps.ApprovalToken != token {
+	if !approvalTokenMatches(ps.ApprovalToken, token) {
 		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 		return
 	}
@@ -187,7 +194,7 @@ func (s *Server) handlePostApproval(w http.ResponseWriter, r *http.Request) {
 	// Cryptographic sign: composite payload covers both document and envelope
 	composite := evidence.CompositePayload(ps.PayloadHash, sealed.Hash)
 
-	dek, err := apoacrypto.UnwrapDEK(sk.DEKEncrypted, s.kek)
+	dek, err := s.kek.UnwrapDEK(sk.DEKEncrypted, sk.KEKAlgo)
 	if err != nil {
 		log.Printf("error unwrapping DEK for %s: %v", sk.KeyID, err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)

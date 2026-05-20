@@ -26,6 +26,7 @@ type SigningKey struct {
 	PublicKey           string // ssh-ed25519 AAAA...
 	PrivateKeyEncrypted []byte
 	DEKEncrypted        []byte
+	KEKAlgo             string // algorithm used to derive the KEK that wrapped DEKEncrypted; "" = legacy SHA-256, "argon2id" = current
 	CreatedAt           time.Time
 	RevokedAt           *time.Time
 	SignCount           int

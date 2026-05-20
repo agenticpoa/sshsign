@@ -196,7 +196,7 @@ func (m Model) executeApprovalAction() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	dek, err := apoacrypto.UnwrapDEK(sk.DEKEncrypted, m.kek)
+	dek, err := m.kek.UnwrapDEK(sk.DEKEncrypted, sk.KEKAlgo)
 	if err != nil {
 		m.pending.status = "Key decryption failed"
 		m.pending.isError = true
@@ -340,14 +340,9 @@ func (m Model) viewPendingDetail() string {
 	if auth != nil && auth.RequireSignature {
 		b.WriteString(m.s.Error.Render("  ⚠ Requires handwritten signature"))
 		b.WriteString("\n")
-		b.WriteString(m.s.Dim.Render("  Open this URL in your browser:"))
+		b.WriteString(m.s.Dim.Render("  Use the approval URL returned to the signer at sign time."))
 		b.WriteString("\n")
-		if ps.ApprovalToken != "" {
-			url := fmt.Sprintf("https://sshsign.dev/approve/%s?token=%s", ps.ID, ps.ApprovalToken)
-			b.WriteString(m.s.Info.Render("  " + url))
-		} else {
-			b.WriteString(m.s.Dim.Render("  (no approval token recorded for this pending)"))
-		}
+		b.WriteString(m.s.Dim.Render("  (Token is hashed at rest and cannot be recovered here.)"))
 		b.WriteString("\n\n")
 	}
 

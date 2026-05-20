@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/wish"
 
 	"github.com/agenticpoa/sshsign/internal/audit"
+	apoacrypto "github.com/agenticpoa/sshsign/internal/crypto"
 	"github.com/agenticpoa/sshsign/internal/sessions"
 	"github.com/agenticpoa/sshsign/internal/storage"
 )
@@ -16,7 +17,7 @@ import (
 // SessionContext holds everything a session needs to operate.
 type SessionContext struct {
 	DB                    *sql.DB
-	KEK                   []byte
+	KEK                   *apoacrypto.KEKRing
 	User                  *storage.User
 	UserKey               *storage.UserKey
 	IsNewUser             bool
@@ -121,7 +122,7 @@ func CommandHandler(sess ssh.Session, sc *SessionContext) {
 // SessionHandler returns a middleware that sets up the session context.
 // For PTY sessions, it passes through to the next handler (bubbletea).
 // For non-PTY sessions, it handles commands directly.
-func SessionHandler(db *sql.DB, kek []byte, rl *ServerRateLimits, auditLog audit.Logger, httpDomain string) func(next ssh.Handler) ssh.Handler {
+func SessionHandler(db *sql.DB, kek *apoacrypto.KEKRing, rl *ServerRateLimits, auditLog audit.Logger, httpDomain string) func(next ssh.Handler) ssh.Handler {
 	// Long-lived, shared across all SSH connections — per-user counters
 	// live inside the limiter and are keyed by sshsign user_id.
 	getSessionLimiter := sessions.NewGetSessionRateLimiter()

@@ -174,3 +174,117 @@ func TestDeriveKEK_EmptySecret(t *testing.T) {
 		t.Error("expected error for empty secret")
 	}
 }
+
+func TestApprovalTokenHashAndVerify(t *testing.T) {
+	raw := "8a3f0b6f2cd14a..fakeRawToken"
+
+	stored := crypto.HashApprovalToken(raw)
+	if stored == raw {
+		t.Fatal("HashApprovalToken returned raw token; must hash")
+	}
+	if stored == "" {
+		t.Fatal("HashApprovalToken returned empty for non-empty input")
+	}
+
+	if !crypto.VerifyApprovalToken(stored, raw) {
+		t.Error("VerifyApprovalToken rejected correct token against stored hash")
+	}
+	if crypto.VerifyApprovalToken(stored, raw+"x") {
+		t.Error("VerifyApprovalToken accepted wrong token")
+	}
+	if crypto.VerifyApprovalToken(stored, "") {
+		t.Error("VerifyApprovalToken accepted empty presented token")
+	}
+	if crypto.VerifyApprovalToken("", raw) {
+		t.Error("VerifyApprovalToken accepted empty stored verifier")
+	}
+}
+
+func TestApprovalTokenLegacyRawAccepted(t *testing.T) {
+	// Rows created before the hashing migration store the raw token
+	// directly. VerifyApprovalToken must still accept them so in-flight
+	// pendings are not bricked.
+	raw := "legacyRawToken"
+	if !crypto.VerifyApprovalToken(raw, raw) {
+		t.Error("VerifyApprovalToken rejected legacy raw match")
+	}
+	if crypto.VerifyApprovalToken(raw, "different") {
+		t.Error("VerifyApprovalToken accepted legacy raw mismatch")
+	}
+}
+
+func TestHashApprovalTokenEmpty(t *testing.T) {
+	if got := crypto.HashApprovalToken(""); got != "" {
+		t.Errorf("HashApprovalToken(\"\") = %q, want empty", got)
+	}
+}
+
+func TestKEKRing_WrapTagsCurrentAlgo(t *testing.T) {
+	ring, err := crypto.NewKEKRingForTests("test-secret")
+	if err != nil {
+		t.Fatalf("building ring: %v", err)
+	}
+	dek, _ := crypto.GenerateDEK()
+	defer crypto.ZeroBytes(dek)
+
+	wrapped, algo, err := ring.WrapDEK(dek)
+	if err != nil {
+		t.Fatalf("WrapDEK: %v", err)
+	}
+	if algo != crypto.KEKAlgoArgon2id {
+		t.Errorf("algo = %q, want %q", algo, crypto.KEKAlgoArgon2id)
+	}
+	unwrapped, err := ring.UnwrapDEK(wrapped, algo)
+	if err != nil {
+		t.Fatalf("UnwrapDEK: %v", err)
+	}
+	if string(unwrapped) != string(dek) {
+		t.Error("round-trip mismatch")
+	}
+}
+
+func TestKEKRing_UnwrapsLegacyRows(t *testing.T) {
+	// A pre-migration row was wrapped with the SHA-256-derived KEK and
+	// stored with kek_algo = "". A real (Argon2id) ring must still be
+	// able to decrypt it via the legacy key in the ring.
+	legacyKEK, err := crypto.DeriveKEK("test-secret-thats-32-chars-long!!")
+	if err != nil {
+		t.Fatalf("DeriveKEK: %v", err)
+	}
+	dek, _ := crypto.GenerateDEK()
+	legacyWrapped, err := crypto.WrapDEK(dek, legacyKEK)
+	if err != nil {
+		t.Fatalf("WrapDEK: %v", err)
+	}
+
+	salt := make([]byte, 32)
+	for i := range salt {
+		salt[i] = byte(i)
+	}
+	ring, err := crypto.NewKEKRing("test-secret-thats-32-chars-long!!", salt)
+	if err != nil {
+		t.Fatalf("NewKEKRing: %v", err)
+	}
+
+	got, err := ring.UnwrapDEK(legacyWrapped, crypto.KEKAlgoLegacy)
+	if err != nil {
+		t.Fatalf("UnwrapDEK legacy row: %v", err)
+	}
+	if string(got) != string(dek) {
+		t.Error("legacy DEK did not round-trip through ring")
+	}
+}
+
+func TestKEKRing_RejectsUnknownAlgo(t *testing.T) {
+	ring, _ := crypto.NewKEKRingForTests("test-secret")
+	if _, err := ring.UnwrapDEK([]byte("anything"), "not-an-algo"); err == nil {
+		t.Error("expected error for unknown KEK algo")
+	}
+}
+
+func TestDeriveKEKArgon2id_RejectsShortSalt(t *testing.T) {
+	if _, err := crypto.DeriveKEKArgon2id("secret", []byte("tooshort")); err == nil {
+		t.Error("expected error for short salt")
+	}
+}
+

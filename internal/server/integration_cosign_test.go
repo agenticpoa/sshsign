@@ -29,9 +29,9 @@ func setupUserWithCosignAuth(t *testing.T, ts *testServer, scopes []string, meta
 	pubSSH, _ := apoacrypto.MarshalPublicKeySSH(edPub)
 	dek, _ := apoacrypto.GenerateDEK()
 	encPrivKey, _ := apoacrypto.EncryptPrivateKey(edPriv, dek)
-	wrappedDEK, _ := apoacrypto.WrapDEK(dek, ts.kek)
+	wrappedDEK, kekAlgo, _ := ts.kek.WrapDEK(dek)
 
-	sk, err := storage.CreateSigningKey(ts.db.DB, user.UserID, pubSSH, encPrivKey, wrappedDEK)
+	sk, err := storage.CreateSigningKey(ts.db.DB, user.UserID, pubSSH, encPrivKey, wrappedDEK, kekAlgo)
 	if err != nil {
 		t.Fatalf("creating signing key: %v", err)
 	}

@@ -29,9 +29,13 @@ func main() {
 		log.Fatalf("running migrations: %v", err)
 	}
 
-	kek, err := crypto.DeriveKEK(cfg.KEKSecret)
+	salt, err := storage.GetOrCreateKEKSalt(db)
 	if err != nil {
-		log.Fatalf("deriving KEK: %v", err)
+		log.Fatalf("loading KEK salt: %v", err)
+	}
+	kek, err := crypto.NewKEKRing(cfg.KEKSecret, salt)
+	if err != nil {
+		log.Fatalf("building KEK ring: %v", err)
 	}
 
 	// Set up audit logger: immudb if configured, otherwise in-memory

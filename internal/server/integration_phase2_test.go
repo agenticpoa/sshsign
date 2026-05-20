@@ -85,12 +85,12 @@ func setupUserWithSigningKeyAndAuth(t *testing.T, ts *testServer, scopes []strin
 		t.Fatalf("encrypting private key: %v", err)
 	}
 
-	wrappedDEK, err := apoacrypto.WrapDEK(dek, ts.kek)
+	wrappedDEK, kekAlgo, err := ts.kek.WrapDEK(dek)
 	if err != nil {
 		t.Fatalf("wrapping DEK: %v", err)
 	}
 
-	sk, err := storage.CreateSigningKey(ts.db.DB, user.UserID, pubSSH, encPrivKey, wrappedDEK)
+	sk, err := storage.CreateSigningKey(ts.db.DB, user.UserID, pubSSH, encPrivKey, wrappedDEK, kekAlgo)
 	if err != nil {
 		t.Fatalf("creating signing key: %v", err)
 	}
@@ -221,9 +221,9 @@ func TestSignDeniedExpiredAuth(t *testing.T) {
 	pubSSH, _ := apoacrypto.MarshalPublicKeySSH(edPub)
 	dek, _ := apoacrypto.GenerateDEK()
 	encPrivKey, _ := apoacrypto.EncryptPrivateKey(edPriv, dek)
-	wrappedDEK, _ := apoacrypto.WrapDEK(dek, ts.kek)
+	wrappedDEK, kekAlgo, _ := ts.kek.WrapDEK(dek)
 
-	sk, _ := storage.CreateSigningKey(ts.db.DB, user.UserID, pubSSH, encPrivKey, wrappedDEK)
+	sk, _ := storage.CreateSigningKey(ts.db.DB, user.UserID, pubSSH, encPrivKey, wrappedDEK, kekAlgo)
 
 	// Create expired authorization
 	expired := time.Now().Add(-1 * time.Hour)

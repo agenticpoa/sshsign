@@ -7,13 +7,13 @@ import (
 )
 
 // CreateSigningKey stores a new signing key with its encrypted private key and DEK.
-func CreateSigningKey(db *sql.DB, ownerID, publicKey string, encPrivKey, encDEK []byte) (*SigningKey, error) {
+func CreateSigningKey(db *sql.DB, ownerID, publicKey string, encPrivKey, encDEK []byte, kekAlgo string) (*SigningKey, error) {
 	keyID := NewKeyID()
 
 	_, err := db.Exec(
-		`INSERT INTO signing_keys (key_id, owner_id, public_key, private_key_encrypted, dek_encrypted)
-		 VALUES (?, ?, ?, ?, ?)`,
-		keyID, ownerID, publicKey, encPrivKey, encDEK,
+		`INSERT INTO signing_keys (key_id, owner_id, public_key, private_key_encrypted, dek_encrypted, kek_algo)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		keyID, ownerID, publicKey, encPrivKey, encDEK, kekAlgo,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("inserting signing key: %w", err)
@@ -23,11 +23,11 @@ func CreateSigningKey(db *sql.DB, ownerID, publicKey string, encPrivKey, encDEK 
 }
 
 // CreateSigningKeyWithID stores a new signing key using a pre-generated key ID.
-func CreateSigningKeyWithID(db *sql.DB, keyID, ownerID, publicKey string, encPrivKey, encDEK []byte) (*SigningKey, error) {
+func CreateSigningKeyWithID(db *sql.DB, keyID, ownerID, publicKey string, encPrivKey, encDEK []byte, kekAlgo string) (*SigningKey, error) {
 	_, err := db.Exec(
-		`INSERT INTO signing_keys (key_id, owner_id, public_key, private_key_encrypted, dek_encrypted)
-		 VALUES (?, ?, ?, ?, ?)`,
-		keyID, ownerID, publicKey, encPrivKey, encDEK,
+		`INSERT INTO signing_keys (key_id, owner_id, public_key, private_key_encrypted, dek_encrypted, kek_algo)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		keyID, ownerID, publicKey, encPrivKey, encDEK, kekAlgo,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("inserting signing key: %w", err)
@@ -39,7 +39,7 @@ func CreateSigningKeyWithID(db *sql.DB, keyID, ownerID, publicKey string, encPri
 // GetSigningKey retrieves a signing key by its ID.
 func GetSigningKey(db *sql.DB, keyID string) (*SigningKey, error) {
 	row := db.QueryRow(
-		`SELECT key_id, owner_id, public_key, private_key_encrypted, dek_encrypted, created_at, revoked_at, sign_count, last_used_at
+		`SELECT key_id, owner_id, public_key, private_key_encrypted, dek_encrypted, created_at, revoked_at, sign_count, last_used_at, kek_algo
 		 FROM signing_keys WHERE key_id = ?`,
 		keyID,
 	)
@@ -57,7 +57,7 @@ func GetSigningKey(db *sql.DB, keyID string) (*SigningKey, error) {
 // ListSigningKeys returns all signing keys owned by a user.
 func ListSigningKeys(db *sql.DB, ownerID string) ([]SigningKey, error) {
 	rows, err := db.Query(
-		`SELECT key_id, owner_id, public_key, private_key_encrypted, dek_encrypted, created_at, revoked_at, sign_count, last_used_at
+		`SELECT key_id, owner_id, public_key, private_key_encrypted, dek_encrypted, created_at, revoked_at, sign_count, last_used_at, kek_algo
 		 FROM signing_keys WHERE owner_id = ? ORDER BY created_at`,
 		ownerID,
 	)
@@ -86,7 +86,7 @@ func scanSigningKey(s signingKeyScannable) (*SigningKey, error) {
 	var createdAt string
 	var revokedAt, lastUsedAt *string
 
-	err := s.Scan(&sk.KeyID, &sk.OwnerID, &sk.PublicKey, &sk.PrivateKeyEncrypted, &sk.DEKEncrypted, &createdAt, &revokedAt, &sk.SignCount, &lastUsedAt)
+	err := s.Scan(&sk.KeyID, &sk.OwnerID, &sk.PublicKey, &sk.PrivateKeyEncrypted, &sk.DEKEncrypted, &createdAt, &revokedAt, &sk.SignCount, &lastUsedAt, &sk.KEKAlgo)
 	if err != nil {
 		return nil, err
 	}

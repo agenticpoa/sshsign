@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/agenticpoa/sshsign/internal/audit"
+	apoacrypto "github.com/agenticpoa/sshsign/internal/crypto"
 	"github.com/agenticpoa/sshsign/internal/storage"
 )
 
@@ -23,7 +24,7 @@ const (
 
 type Model struct {
 	db          *sql.DB
-	kek         []byte
+	kek         *apoacrypto.KEKRing
 	auditLogger audit.Logger
 	user        *storage.User
 	userKey     *storage.UserKey
@@ -43,11 +44,11 @@ type Model struct {
 	pending    pendingApprovalsModel
 }
 
-func NewModel(db *sql.DB, kek []byte, user *storage.User, userKey *storage.UserKey, isNewUser bool) Model {
+func NewModel(db *sql.DB, kek *apoacrypto.KEKRing, user *storage.User, userKey *storage.UserKey, isNewUser bool) Model {
 	return NewModelWithRenderer(db, kek, nil, user, userKey, isNewUser, lipgloss.DefaultRenderer())
 }
 
-func NewModelWithRenderer(db *sql.DB, kek []byte, auditLogger audit.Logger, user *storage.User, userKey *storage.UserKey, isNewUser bool, r *lipgloss.Renderer) Model {
+func NewModelWithRenderer(db *sql.DB, kek *apoacrypto.KEKRing, auditLogger audit.Logger, user *storage.User, userKey *storage.UserKey, isNewUser bool, r *lipgloss.Renderer) Model {
 	return Model{
 		db:          db,
 		kek:         kek,

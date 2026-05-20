@@ -318,9 +318,12 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 			approvalToken = hex.EncodeToString(tokenBytes)
 		}
 
+		// Persist only the verifier hash; the raw token is returned once,
+		// below, in the approval URL, then never recoverable from the DB.
 		ps, err := storage.CreatePendingSignature(
 			sc.DB, sk.KeyID, decision.TokenID, sc.User.UserID,
-			actionType, payloadHash, metadataJSON, approvalToken, sessionID,
+			actionType, payloadHash, metadataJSON,
+			apoacrypto.HashApprovalToken(approvalToken), sessionID,
 		)
 		if err != nil {
 			writeJSON(sess, errorResponse{Error: fmt.Sprintf("creating pending signature: %v", err)})
@@ -349,7 +352,7 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 
 	// Decrypt the private key
-	dek, err := apoacrypto.UnwrapDEK(sk.DEKEncrypted, sc.KEK)
+	dek, err := sc.KEK.UnwrapDEK(sk.DEKEncrypted, sk.KEKAlgo)
 	if err != nil {
 		writeJSON(sess, errorResponse{Error: "internal error: key decryption failed"})
 		log.Printf("error unwrapping DEK for key %s: %v", sk.KeyID, err)
@@ -605,14 +608,14 @@ func handleCreateKey(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 	apoacrypto.ZeroBytes(priv)
 
-	wrappedDEK, err := apoacrypto.WrapDEK(dek, sc.KEK)
+	wrappedDEK, kekAlgo, err := sc.KEK.WrapDEK(dek)
 	if err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("wrapping DEK: %v", err)})
 		return
 	}
 
 	// Persist key
-	sk, err := storage.CreateSigningKey(sc.DB, sc.User.UserID, pubSSH, encPrivKey, wrappedDEK)
+	sk, err := storage.CreateSigningKey(sc.DB, sc.User.UserID, pubSSH, encPrivKey, wrappedDEK, kekAlgo)
 	if err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("storing key: %v", err)})
 		return
@@ -784,8 +787,7 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 	if authToken.RequireSignature {
 		env, _ := storage.GetEvidenceEnvelope(sc.DB, pendingID)
 		if env == nil {
-			url := fmt.Sprintf("https://%s/approve/%s?token=%s", approvalDomain(sc), ps.ID, ps.ApprovalToken)
-			writeJSON(sess, errorResponse{Error: fmt.Sprintf("this approval requires a handwritten signature: %s", url)})
+			writeJSON(sess, errorResponse{Error: "this approval requires a handwritten signature: open the approval URL returned at sign time"})
 			return
 		}
 	}
@@ -812,7 +814,7 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 
 	// Decrypt and sign
-	dek, err := apoacrypto.UnwrapDEK(sk.DEKEncrypted, sc.KEK)
+	dek, err := sc.KEK.UnwrapDEK(sk.DEKEncrypted, sk.KEKAlgo)
 	if err != nil {
 		writeJSON(sess, errorResponse{Error: "internal error: key decryption failed"})
 		log.Printf("error unwrapping DEK for key %s: %v", sk.KeyID, err)

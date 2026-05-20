@@ -17,10 +17,11 @@ import (
 
 	"github.com/agenticpoa/sshsign/internal/audit"
 	"github.com/agenticpoa/sshsign/internal/config"
+	apoacrypto "github.com/agenticpoa/sshsign/internal/crypto"
 	appTUI "github.com/agenticpoa/sshsign/internal/tui"
 )
 
-func New(cfg config.Config, db *sql.DB, kek []byte, auditLog audit.Logger) (*ssh.Server, error) {
+func New(cfg config.Config, db *sql.DB, kek *apoacrypto.KEKRing, auditLog audit.Logger) (*ssh.Server, error) {
 	rl := NewServerRateLimits()
 
 	srv, err := wish.NewServer(
@@ -41,7 +42,7 @@ func New(cfg config.Config, db *sql.DB, kek []byte, auditLog audit.Logger) (*ssh
 	return srv, nil
 }
 
-func tuiHandler(db *sql.DB, kek []byte, auditLog audit.Logger) bubbletea.Handler {
+func tuiHandler(db *sql.DB, kek *apoacrypto.KEKRing, auditLog audit.Logger) bubbletea.Handler {
 	return func(sess ssh.Session) (tea.Model, []tea.ProgramOption) {
 		renderer := bubbletea.MakeRenderer(sess)
 		sc := SessionContextFromContext(sess.Context())

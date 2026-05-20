@@ -21,11 +21,20 @@ func newTestDB(t *testing.T) *storage.TestDB {
 	return tdb
 }
 
+func mustTestKEK(t *testing.T) *crypto.KEKRing {
+	t.Helper()
+	kek, err := crypto.NewKEKRingForTests("test-secret")
+	if err != nil {
+		t.Fatalf("building test KEK ring: %v", err)
+	}
+	return kek
+}
+
 func setupTest(t *testing.T) (*Server, *storage.PendingSignature) {
 	t.Helper()
 	tdb := newTestDB(t)
 
-	kek, _ := crypto.DeriveKEK("test-secret")
+	kek, _ := crypto.NewKEKRingForTests("test-secret")
 	srv := New(":0", tdb.DB, kek)
 
 	// Create user, key, auth, pending
@@ -34,21 +43,22 @@ func setupTest(t *testing.T) (*Server, *storage.PendingSignature) {
 	pubSSH, _ := crypto.MarshalPublicKeySSH(pub)
 	dek, _ := crypto.GenerateDEK()
 	encPriv, _ := crypto.EncryptPrivateKey(priv, dek)
-	wrappedDEK, _ := crypto.WrapDEK(dek, kek)
-	sk, _ := storage.CreateSigningKey(tdb.DB, user.UserID, pubSSH, encPriv, wrappedDEK)
+	wrappedDEK, kekAlgo, _ := kek.WrapDEK(dek)
+	sk, _ := storage.CreateSigningKey(tdb.DB, user.UserID, pubSSH, encPriv, wrappedDEK, kekAlgo)
 
 	auth, _ := storage.CreateAuthorizationFull(tdb.DB, sk.KeyID, user.UserID,
 		[]string{"safe-agreement"}, nil, nil, "cosign", true, nil, nil, nil)
 
 	ps, _ := storage.CreatePendingSignature(tdb.DB, sk.KeyID, auth.TokenID, user.UserID,
-		"safe-agreement", "sha256:deadbeef", `{"valuation_cap": 10000000}`, "testtoken123", "")
+		"safe-agreement", "sha256:deadbeef", `{"valuation_cap": 10000000}`,
+		crypto.HashApprovalToken("testtoken123"), "")
 
 	return srv, ps
 }
 
 func TestGetApproval_InvalidPendingID(t *testing.T) {
 	tdb := newTestDB(t)
-	srv := New(":0", tdb.DB, []byte("k"))
+	srv := New(":0", tdb.DB, mustTestKEK(t))
 
 	req := httptest.NewRequest("GET", "/approve/invalid!id?token=abc", nil)
 	req.SetPathValue("pendingID", "invalid!id")
@@ -62,7 +72,7 @@ func TestGetApproval_InvalidPendingID(t *testing.T) {
 
 func TestGetApproval_NotFound(t *testing.T) {
 	tdb := newTestDB(t)
-	srv := New(":0", tdb.DB, []byte("k"))
+	srv := New(":0", tdb.DB, mustTestKEK(t))
 
 	req := httptest.NewRequest("GET", "/approve/pnd_000000000000?token=abc", nil)
 	req.SetPathValue("pendingID", "pnd_000000000000")
@@ -184,7 +194,7 @@ func TestPostApproval_AlreadyResolved(t *testing.T) {
 
 func TestPostApproval_SQLInjection(t *testing.T) {
 	tdb := newTestDB(t)
-	srv := New(":0", tdb.DB, []byte("k"))
+	srv := New(":0", tdb.DB, mustTestKEK(t))
 
 	req := httptest.NewRequest("POST", "/approve/test", strings.NewReader("{}"))
 	req.SetPathValue("pendingID", "pnd_x'; DROP TABLE")
@@ -220,7 +230,7 @@ func TestSecurityHeaders(t *testing.T) {
 
 func TestGetApproval_XSSEscaping(t *testing.T) {
 	tdb := newTestDB(t)
-	kek, _ := crypto.DeriveKEK("test-secret")
+	kek, _ := crypto.NewKEKRingForTests("test-secret")
 	srv := New(":0", tdb.DB, kek)
 
 	user, _, _ := storage.CreateUser(tdb.DB, "SHA256:xssfp", "ssh-ed25519 xsskey")
@@ -228,14 +238,14 @@ func TestGetApproval_XSSEscaping(t *testing.T) {
 	pubSSH, _ := crypto.MarshalPublicKeySSH(pub)
 	dek, _ := crypto.GenerateDEK()
 	encPriv, _ := crypto.EncryptPrivateKey(priv, dek)
-	wrappedDEK, _ := crypto.WrapDEK(dek, kek)
-	sk, _ := storage.CreateSigningKey(tdb.DB, user.UserID, pubSSH, encPriv, wrappedDEK)
+	wrappedDEK, kekAlgo, _ := kek.WrapDEK(dek)
+	sk, _ := storage.CreateSigningKey(tdb.DB, user.UserID, pubSSH, encPriv, wrappedDEK, kekAlgo)
 	auth, _ := storage.CreateAuthorizationFull(tdb.DB, sk.KeyID, user.UserID,
 		[]string{"safe"}, nil, nil, "cosign", true, nil, nil, nil)
 
 	xss := `{"<script>alert(1)</script>": "xss"}`
 	ps, _ := storage.CreatePendingSignature(tdb.DB, sk.KeyID, auth.TokenID, user.UserID,
-		"safe", "sha256:test", xss, "xsstoken", "")
+		"safe", "sha256:test", xss, crypto.HashApprovalToken("xsstoken"), "")
 
 	req := httptest.NewRequest("GET", "/approve/"+ps.ID+"?token=xsstoken", nil)
 	req.SetPathValue("pendingID", ps.ID)

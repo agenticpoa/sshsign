@@ -8,17 +8,19 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	apoacrypto "github.com/agenticpoa/sshsign/internal/crypto"
 )
 
 // Server holds the HTTP server and its dependencies.
 type Server struct {
 	db         *sql.DB
-	kek        []byte
+	kek        *apoacrypto.KEKRing
 	httpServer *http.Server
 }
 
 // New creates an HTTP server for the web approval flow.
-func New(addr string, db *sql.DB, kek []byte) *Server {
+func New(addr string, db *sql.DB, kek *apoacrypto.KEKRing) *Server {
 	s := &Server{db: db, kek: kek}
 
 	mux := http.NewServeMux()

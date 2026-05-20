@@ -72,6 +72,12 @@ func Migrate(db *sql.DB) error {
 		// reconstruct local state from sshsign instead of depending on
 		// a tiny local pointer file.
 		`ALTER TABLE signing_session_members ADD COLUMN telegram_user_id TEXT`,
+		// KEK migration: tag each signing_keys row with the algorithm
+		// used to derive the KEK that wraps its DEK. NULL/empty = legacy
+		// SHA-256 derivation (pre-migration rows); "argon2id" = new rows
+		// wrapped under the Argon2id-derived KEK. Lets a single server
+		// instance read both during the migration window.
+		`ALTER TABLE signing_keys ADD COLUMN kek_algo TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, m := range columnMigrations {
 		_, err := db.Exec(m)
@@ -252,4 +258,15 @@ CREATE TABLE IF NOT EXISTS signing_session_audit (
 );
 
 CREATE INDEX IF NOT EXISTS idx_session_audit_session ON signing_session_audit(session_id, created_at);
+
+-- server_config: singleton row (id = 1) carrying values the server needs
+-- to be the same across restarts. Currently only kek_salt, the salt used
+-- by the Argon2id KEK derivation. Persisted in the same DB so taking a
+-- backup of the DB also captures the salt — losing it would render every
+-- wrapped DEK irrecoverable.
+CREATE TABLE IF NOT EXISTS server_config (
+	id          INTEGER PRIMARY KEY CHECK (id = 1),
+	kek_salt    BLOB NOT NULL,
+	created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `

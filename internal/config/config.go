@@ -31,6 +31,13 @@ func Load() (Config, error) {
 	if cfg.KEKSecret == "" {
 		return Config{}, fmt.Errorf("SSHSIGN_KEK_SECRET environment variable is required")
 	}
+	// Argon2id hardens against brute-force, but a short secret remains
+	// the weakest link in the chain. 32 chars (≈192 bits of entropy if
+	// random base64, less if a passphrase) is a practical floor; raise
+	// it once secrets are KMS-managed.
+	if len(cfg.KEKSecret) < 32 {
+		return Config{}, fmt.Errorf("SSHSIGN_KEK_SECRET must be at least 32 characters (got %d)", len(cfg.KEKSecret))
+	}
 
 	return cfg, nil
 }
