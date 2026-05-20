@@ -30,6 +30,19 @@ func approvalTokenMatches(stored, presented string) bool {
 	return apoacrypto.VerifyApprovalToken(stored, presented)
 }
 
+// pendingBinding extracts the MAC-binding fields from a stored row.
+// Mirrors server.pendingBindingFor — the two must stay in lockstep.
+func pendingBinding(ps *storage.PendingSignature) apoacrypto.PendingBinding {
+	return apoacrypto.PendingBinding{
+		SigningKeyID: ps.SigningKeyID,
+		AuthTokenID:  ps.AuthTokenID,
+		RequesterID:  ps.RequesterID,
+		DocType:      ps.DocType,
+		PayloadHash:  ps.PayloadHash,
+		Metadata:     ps.Metadata,
+	}
+}
+
 // handleGetApproval renders the signature capture page.
 func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 	pendingID := r.PathValue("pendingID")
@@ -53,6 +66,12 @@ func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 
 	if time.Since(ps.CreatedAt) > approvalTokenTTL {
 		http.Error(w, "this approval link has expired", http.StatusGone)
+		return
+	}
+
+	if !s.kek.VerifyPendingMAC(pendingBinding(ps), ps.PendingMAC) {
+		log.Printf("PENDING_MAC_MISMATCH pending_id=%s path=GET", ps.ID)
+		http.Error(w, "pending signature integrity check failed", http.StatusGone)
 		return
 	}
 
@@ -104,6 +123,12 @@ func (s *Server) handlePostApproval(w http.ResponseWriter, r *http.Request) {
 
 	if time.Since(ps.CreatedAt) > approvalTokenTTL {
 		http.Error(w, `{"error":"approval link expired"}`, http.StatusGone)
+		return
+	}
+
+	if !s.kek.VerifyPendingMAC(pendingBinding(ps), ps.PendingMAC) {
+		log.Printf("PENDING_MAC_MISMATCH pending_id=%s path=POST", ps.ID)
+		http.Error(w, `{"error":"pending signature integrity check failed"}`, http.StatusGone)
 		return
 	}
 

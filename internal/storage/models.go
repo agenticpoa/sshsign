@@ -73,6 +73,7 @@ type PendingSignature struct {
 	ApprovalToken    string // random token for web approval URL
 	SigningSessionID string // groups related pendings in a multi-party signing
 	Signature        string // SSHSIG signature, set on approval
+	PendingMAC       []byte // HMAC binding the signing-intent fields; verified on approve
 	CreatedAt        time.Time
 	ResolvedAt       *time.Time
 	ResolvedBy       string

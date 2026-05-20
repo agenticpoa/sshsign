@@ -320,10 +320,22 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 
 		// Persist only the verifier hash; the raw token is returned once,
 		// below, in the approval URL, then never recoverable from the DB.
+		// pendingMAC binds the row's signing-intent fields so a DB
+		// tamper between sign-request and approval is detected at the
+		// approval handler.
+		pendingMAC := sc.KEK.ComputePendingMAC(apoacrypto.PendingBinding{
+			SigningKeyID: sk.KeyID,
+			AuthTokenID:  decision.TokenID,
+			RequesterID:  sc.User.UserID,
+			DocType:      actionType,
+			PayloadHash:  payloadHash,
+			Metadata:     metadataJSON,
+		})
 		ps, err := storage.CreatePendingSignature(
 			sc.DB, sk.KeyID, decision.TokenID, sc.User.UserID,
 			actionType, payloadHash, metadataJSON,
 			apoacrypto.HashApprovalToken(approvalToken), sessionID,
+			pendingMAC,
 		)
 		if err != nil {
 			writeJSON(sess, errorResponse{Error: fmt.Sprintf("creating pending signature: %v", err)})
@@ -748,6 +760,25 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 
 	if ps.Status != "pending" {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("pending signature %s already resolved: %s", pendingID, ps.Status)})
+		return
+	}
+
+	// Tamper detection: refuse to sign if the row's bound fields no
+	// longer match the MAC computed at sign-request time. Catches DB
+	// tamper that swapped the payload hash or metadata between request
+	// and approval.
+	if !sc.KEK.VerifyPendingMAC(pendingBindingFor(ps), ps.PendingMAC) {
+		log.Printf("PENDING_MAC_MISMATCH pending_id=%s requester=%s", ps.ID, ps.RequesterID)
+		logAudit(sc.Audit, audit.Entry{
+			UserID:             sc.User.UserID,
+			SigningKeyID:       ps.SigningKeyID,
+			ActionType:         ps.DocType,
+			PayloadHash:        ps.PayloadHash,
+			AuthorizationToken: ps.AuthTokenID,
+			Result:             "DENIED",
+			DenialReason:       "pending row tamper detected (MAC mismatch)",
+		})
+		writeJSON(sess, errorResponse{Error: "pending signature integrity check failed; refusing to sign"})
 		return
 	}
 
@@ -1215,6 +1246,20 @@ func handleHistory(sess ssh.Session, sc *SessionContext, args []string) {
 }
 
 // logAudit writes an audit entry. Returns the tx ID, or 0 if logging fails/is nil.
+// pendingBindingFor extracts the MAC binding fields from a stored
+// pending row. Centralized so the sign-time and approve-time encodings
+// stay in lockstep — a divergence would silently break every cosign.
+func pendingBindingFor(ps *storage.PendingSignature) apoacrypto.PendingBinding {
+	return apoacrypto.PendingBinding{
+		SigningKeyID: ps.SigningKeyID,
+		AuthTokenID:  ps.AuthTokenID,
+		RequesterID:  ps.RequesterID,
+		DocType:      ps.DocType,
+		PayloadHash:  ps.PayloadHash,
+		Metadata:     ps.Metadata,
+	}
+}
+
 func logAudit(logger audit.Logger, entry audit.Entry) uint64 {
 	if logger == nil {
 		return 0

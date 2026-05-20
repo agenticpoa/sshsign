@@ -49,9 +49,14 @@ func setupTest(t *testing.T) (*Server, *storage.PendingSignature) {
 	auth, _ := storage.CreateAuthorizationFull(tdb.DB, sk.KeyID, user.UserID,
 		[]string{"safe-agreement"}, nil, nil, "cosign", true, nil, nil, nil)
 
+	mac := kek.ComputePendingMAC(crypto.PendingBinding{
+		SigningKeyID: sk.KeyID, AuthTokenID: auth.TokenID, RequesterID: user.UserID,
+		DocType: "safe-agreement", PayloadHash: "sha256:deadbeef",
+		Metadata: `{"valuation_cap": 10000000}`,
+	})
 	ps, _ := storage.CreatePendingSignature(tdb.DB, sk.KeyID, auth.TokenID, user.UserID,
 		"safe-agreement", "sha256:deadbeef", `{"valuation_cap": 10000000}`,
-		crypto.HashApprovalToken("testtoken123"), "")
+		crypto.HashApprovalToken("testtoken123"), "", mac)
 
 	return srv, ps
 }
@@ -244,8 +249,12 @@ func TestGetApproval_XSSEscaping(t *testing.T) {
 		[]string{"safe"}, nil, nil, "cosign", true, nil, nil, nil)
 
 	xss := `{"<script>alert(1)</script>": "xss"}`
+	mac := kek.ComputePendingMAC(crypto.PendingBinding{
+		SigningKeyID: sk.KeyID, AuthTokenID: auth.TokenID, RequesterID: user.UserID,
+		DocType: "safe", PayloadHash: "sha256:test", Metadata: xss,
+	})
 	ps, _ := storage.CreatePendingSignature(tdb.DB, sk.KeyID, auth.TokenID, user.UserID,
-		"safe", "sha256:test", xss, crypto.HashApprovalToken("xsstoken"), "")
+		"safe", "sha256:test", xss, crypto.HashApprovalToken("xsstoken"), "", mac)
 
 	req := httptest.NewRequest("GET", "/approve/"+ps.ID+"?token=xsstoken", nil)
 	req.SetPathValue("pendingID", ps.ID)

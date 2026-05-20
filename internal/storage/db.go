@@ -78,6 +78,13 @@ func Migrate(db *sql.DB) error {
 		// wrapped under the Argon2id-derived KEK. Lets a single server
 		// instance read both during the migration window.
 		`ALTER TABLE signing_keys ADD COLUMN kek_algo TEXT NOT NULL DEFAULT ''`,
+		// Cosign tamper-evidence: HMAC over (signing_key_id, auth_token_id,
+		// requester_id, doc_type, payload_hash, metadata) keyed by an
+		// HKDF-derived server key. Verified at approval time so a tampered
+		// DB cannot trick a human into approving a different document
+		// than the one they reviewed. Pre-migration rows store NULL and
+		// are rejected on cosign — by design, no silent downgrade.
+		`ALTER TABLE pending_signatures ADD COLUMN pending_mac BLOB`,
 	}
 	for _, m := range columnMigrations {
 		_, err := db.Exec(m)

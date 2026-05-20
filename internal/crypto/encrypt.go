@@ -4,15 +4,18 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
+	"golang.org/x/crypto/hkdf"
 )
 
 // KEK algorithm tags persisted on every signing_keys row so a server can
@@ -65,10 +68,15 @@ func DeriveKEKArgon2id(secret string, salt []byte) ([]byte, error) {
 // the legacy entry is only consulted to decrypt rows written before the
 // Argon2id migration. Both keys are kept in memory for the process
 // lifetime — zero them via ZeroBytes if the ring is ever discarded.
+//
+// The ring also carries the HMAC key that binds pending_signatures rows
+// to their immutable fields (see ComputePendingMAC). Putting it here
+// keeps every server-secret-derived value behind one constructor.
 type KEKRing struct {
 	legacy      []byte
 	current     []byte
 	currentAlgo string
+	macKey      []byte // HMAC-SHA256 key for pending-row binding
 }
 
 // NewKEKRingForTests builds a ring suitable for unit and integration
@@ -81,7 +89,12 @@ func NewKEKRingForTests(secret string) (*KEKRing, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &KEKRing{legacy: kek, current: kek, currentAlgo: KEKAlgoArgon2id}, nil
+	return &KEKRing{
+		legacy:      kek,
+		current:     kek,
+		currentAlgo: KEKAlgoArgon2id,
+		macKey:      derivePendingMACKey(kek),
+	}, nil
 }
 
 // NewKEKRing builds a KEKRing from the server's KEK secret and a stored
@@ -96,7 +109,12 @@ func NewKEKRing(secret string, salt []byte) (*KEKRing, error) {
 	if err != nil {
 		return nil, fmt.Errorf("deriving argon2id KEK: %w", err)
 	}
-	return &KEKRing{legacy: legacy, current: current, currentAlgo: KEKAlgoArgon2id}, nil
+	return &KEKRing{
+		legacy:      legacy,
+		current:     current,
+		currentAlgo: KEKAlgoArgon2id,
+		macKey:      derivePendingMACKey(current),
+	}, nil
 }
 
 // WrapDEK encrypts dek with the current KEK and returns the wrapped
@@ -134,6 +152,71 @@ func (r *KEKRing) kekFor(algo string) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unknown KEK algorithm %q", algo)
 	}
+}
+
+// PendingBinding holds the fields a cosign approval signs over. Every
+// value that shapes signing intent — which key signs, which auth
+// authorizes, who requested, what document type, the payload hash, and
+// the request metadata — is included so any tamper between sign-request
+// and approval is detected.
+type PendingBinding struct {
+	SigningKeyID string
+	AuthTokenID  string
+	RequesterID  string
+	DocType      string
+	PayloadHash  string
+	Metadata     string
+}
+
+// pendingMACInfo is the HKDF info string for deriving the pending-row
+// HMAC key. Bumping the version suffix rotates every binding at once;
+// existing pendings would fail verification on the next approve.
+const pendingMACInfo = "sshsign-pending-mac-v1"
+
+func derivePendingMACKey(currentKEK []byte) []byte {
+	out := make([]byte, 32)
+	h := hkdf.Expand(sha256.New, currentKEK, []byte(pendingMACInfo))
+	_, _ = io.ReadFull(h, out)
+	return out
+}
+
+func (b PendingBinding) canonical() []byte {
+	// Length-prefix every field so encoded boundaries are unambiguous —
+	// {"foo", "barbaz"} can't collide with {"foobar", "baz"}.
+	fields := []string{b.SigningKeyID, b.AuthTokenID, b.RequesterID, b.DocType, b.PayloadHash, b.Metadata}
+	total := 0
+	for _, f := range fields {
+		total += 4 + len(f)
+	}
+	out := make([]byte, 0, total)
+	var lenBuf [4]byte
+	for _, f := range fields {
+		binary.BigEndian.PutUint32(lenBuf[:], uint32(len(f)))
+		out = append(out, lenBuf[:]...)
+		out = append(out, f...)
+	}
+	return out
+}
+
+// ComputePendingMAC returns the HMAC-SHA256 of the binding's canonical
+// encoding under the ring's pending MAC key. Persist alongside the row
+// at sign time; recompute on approve and compare with VerifyPendingMAC.
+func (r *KEKRing) ComputePendingMAC(b PendingBinding) []byte {
+	h := hmac.New(sha256.New, r.macKey)
+	h.Write(b.canonical())
+	return h.Sum(nil)
+}
+
+// VerifyPendingMAC returns true iff mac was produced by ComputePendingMAC
+// for the same binding under this ring. Empty mac is rejected so a row
+// whose pending_mac column was zeroed cannot be silently downgraded to
+// "no integrity check."
+func (r *KEKRing) VerifyPendingMAC(b PendingBinding, mac []byte) bool {
+	if len(mac) == 0 {
+		return false
+	}
+	expected := r.ComputePendingMAC(b)
+	return subtle.ConstantTimeCompare(expected, mac) == 1
 }
 
 // GenerateDEK generates a random 32-byte data encryption key.

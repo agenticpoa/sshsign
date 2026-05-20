@@ -122,6 +122,96 @@ func TestCosignFlow_ApproveProducesSignature(t *testing.T) {
 	}
 }
 
+func TestCosignFlow_RejectsTamperedPayloadHash(t *testing.T) {
+	ts := setupTestServer(t)
+
+	signer, _, keyID := setupUserWithCosignAuth(t, ts, []string{"safe-agreement"}, nil)
+
+	// Submit a sign request whose payload SHOULD bind to "good payload".
+	signCmd := "sign --type safe-agreement --key-id " + keyID
+	signOutput, _ := sshClientWithStdin(t, ts.addr, signer, signCmd, []byte("good payload"))
+
+	var pendingResp struct {
+		PendingID string `json:"pending_id"`
+	}
+	if err := json.Unmarshal([]byte(signOutput), &pendingResp); err != nil {
+		t.Fatalf("parse sign output: %v\nraw: %s", err, signOutput)
+	}
+
+	// Simulate a DB tamper: swap the payload_hash on the pending row.
+	// MAC was computed over the original hash, so verification must fail.
+	_, err := ts.db.DB.Exec(
+		`UPDATE pending_signatures SET payload_hash = ? WHERE id = ?`,
+		"sha256:attacker-substituted-payload", pendingResp.PendingID,
+	)
+	if err != nil {
+		t.Fatalf("tampering payload_hash: %v", err)
+	}
+
+	approveOutput, _ := sshClient(t, ts.addr, signer, "approve --id "+pendingResp.PendingID+" --confirm")
+	var approveResp struct {
+		Signature string `json:"signature"`
+		Error     string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(approveOutput), &approveResp); err != nil {
+		t.Fatalf("parse approve output: %v\nraw: %s", err, approveOutput)
+	}
+	if approveResp.Signature != "" {
+		t.Fatal("approve produced a signature against a tampered payload_hash")
+	}
+	if !strings.Contains(approveResp.Error, "integrity check failed") {
+		t.Errorf("expected integrity error, got: %q", approveResp.Error)
+	}
+
+	// Tamper attempt must be recorded in the audit log.
+	found := false
+	for _, e := range ts.auditLog.Entries() {
+		if e.Result == "DENIED" && strings.Contains(e.DenialReason, "MAC mismatch") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("MAC mismatch was not recorded in the audit log")
+	}
+}
+
+func TestCosignFlow_RejectsRowWithoutMAC(t *testing.T) {
+	ts := setupTestServer(t)
+
+	signer, _, keyID := setupUserWithCosignAuth(t, ts, []string{"safe-agreement"}, nil)
+
+	signCmd := "sign --type safe-agreement --key-id " + keyID
+	signOutput, _ := sshClientWithStdin(t, ts.addr, signer, signCmd, []byte("legacy payload"))
+
+	var pendingResp struct {
+		PendingID string `json:"pending_id"`
+	}
+	json.Unmarshal([]byte(signOutput), &pendingResp)
+
+	// Simulate a pre-migration row: clear the MAC. Approve must refuse
+	// rather than silently downgrade to "no integrity check."
+	if _, err := ts.db.DB.Exec(
+		`UPDATE pending_signatures SET pending_mac = NULL WHERE id = ?`,
+		pendingResp.PendingID,
+	); err != nil {
+		t.Fatalf("clearing MAC: %v", err)
+	}
+
+	approveOutput, _ := sshClient(t, ts.addr, signer, "approve --id "+pendingResp.PendingID+" --confirm")
+	var approveResp struct {
+		Signature string `json:"signature"`
+		Error     string `json:"error"`
+	}
+	json.Unmarshal([]byte(approveOutput), &approveResp)
+	if approveResp.Signature != "" {
+		t.Fatal("approve produced a signature against a row with no MAC")
+	}
+	if !strings.Contains(approveResp.Error, "integrity check failed") {
+		t.Errorf("expected integrity error, got: %q", approveResp.Error)
+	}
+}
+
 func TestCosignFlow_DenyIsLogged(t *testing.T) {
 	ts := setupTestServer(t)
 

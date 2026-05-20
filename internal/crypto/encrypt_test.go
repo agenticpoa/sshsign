@@ -288,3 +288,92 @@ func TestDeriveKEKArgon2id_RejectsShortSalt(t *testing.T) {
 	}
 }
 
+func TestPendingMAC_RoundTrip(t *testing.T) {
+	ring, err := crypto.NewKEKRingForTests("test-secret")
+	if err != nil {
+		t.Fatalf("ring: %v", err)
+	}
+	b := crypto.PendingBinding{
+		SigningKeyID: "ak_1", AuthTokenID: "at_1", RequesterID: "u_1",
+		DocType: "safe-agreement", PayloadHash: "sha256:abc",
+		Metadata: `{"valuation_cap":10000000}`,
+	}
+	mac := ring.ComputePendingMAC(b)
+	if !ring.VerifyPendingMAC(b, mac) {
+		t.Error("round-trip verify failed")
+	}
+}
+
+func TestPendingMAC_DetectsFieldTamper(t *testing.T) {
+	ring, _ := crypto.NewKEKRingForTests("test-secret")
+	orig := crypto.PendingBinding{
+		SigningKeyID: "ak_1", AuthTokenID: "at_1", RequesterID: "u_1",
+		DocType: "safe-agreement", PayloadHash: "sha256:abc",
+		Metadata: `{"valuation_cap":10000000}`,
+	}
+	mac := ring.ComputePendingMAC(orig)
+
+	cases := []struct {
+		name   string
+		mutate func(*crypto.PendingBinding)
+	}{
+		{"payload_hash swapped", func(b *crypto.PendingBinding) { b.PayloadHash = "sha256:xyz" }},
+		{"metadata swapped", func(b *crypto.PendingBinding) { b.Metadata = `{"valuation_cap":100000000}` }},
+		{"signing_key swapped", func(b *crypto.PendingBinding) { b.SigningKeyID = "ak_evil" }},
+		{"auth_token swapped", func(b *crypto.PendingBinding) { b.AuthTokenID = "at_evil" }},
+		{"requester swapped", func(b *crypto.PendingBinding) { b.RequesterID = "u_evil" }},
+		{"doc_type swapped", func(b *crypto.PendingBinding) { b.DocType = "loan-agreement" }},
+	}
+	for _, tc := range cases {
+		tampered := orig
+		tc.mutate(&tampered)
+		if ring.VerifyPendingMAC(tampered, mac) {
+			t.Errorf("%s: verify succeeded against tampered binding", tc.name)
+		}
+	}
+}
+
+func TestPendingMAC_RejectsEmpty(t *testing.T) {
+	ring, _ := crypto.NewKEKRingForTests("test-secret")
+	b := crypto.PendingBinding{SigningKeyID: "ak_1", PayloadHash: "sha256:abc"}
+	if ring.VerifyPendingMAC(b, nil) {
+		t.Error("verify accepted nil MAC")
+	}
+	if ring.VerifyPendingMAC(b, []byte{}) {
+		t.Error("verify accepted empty MAC")
+	}
+}
+
+func TestPendingMAC_LengthPrefixingPreventsConcatenationCollision(t *testing.T) {
+	// {"foo", "barbaz"} must not collide with {"foobar", "baz"}. Without
+	// length-prefixing, naive concatenation would produce the same input
+	// to HMAC for both.
+	ring, _ := crypto.NewKEKRingForTests("test-secret")
+	a := ring.ComputePendingMAC(crypto.PendingBinding{
+		SigningKeyID: "foo", AuthTokenID: "barbaz",
+	})
+	b := ring.ComputePendingMAC(crypto.PendingBinding{
+		SigningKeyID: "foobar", AuthTokenID: "baz",
+	})
+	if string(a) == string(b) {
+		t.Error("MAC collision across field boundaries — canonical encoding broken")
+	}
+}
+
+func TestPendingMAC_StableAcrossRingsWithSameSecret(t *testing.T) {
+	// Two rings derived from the same secret+salt must produce the same
+	// MAC — otherwise restarts would invalidate every in-flight pending.
+	salt := make([]byte, 32)
+	for i := range salt {
+		salt[i] = byte(i)
+	}
+	r1, _ := crypto.NewKEKRing("test-secret-thats-32-chars-long!!", salt)
+	r2, _ := crypto.NewKEKRing("test-secret-thats-32-chars-long!!", salt)
+	b := crypto.PendingBinding{
+		SigningKeyID: "ak_1", PayloadHash: "sha256:abc",
+	}
+	if string(r1.ComputePendingMAC(b)) != string(r2.ComputePendingMAC(b)) {
+		t.Error("MAC differs across rings with identical secret+salt")
+	}
+}
+
