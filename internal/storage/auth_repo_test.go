@@ -91,6 +91,49 @@ func TestFindAuthorizationsForKey(t *testing.T) {
 	}
 }
 
+func TestFindAuthorizationsForKey_ExcludesExpired(t *testing.T) {
+	tdb := testDB(t)
+	user, sk := setupUserAndKey(t, tdb)
+
+	// Active (no expiry)
+	_, err := storage.CreateAuthorization(tdb.DB, sk.KeyID, user.UserID,
+		[]string{"alpha"}, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("creating active auth: %v", err)
+	}
+
+	// Active (future expiry)
+	future := time.Now().Add(24 * time.Hour)
+	_, err = storage.CreateAuthorization(tdb.DB, sk.KeyID, user.UserID,
+		[]string{"beta"}, nil, nil, nil, &future)
+	if err != nil {
+		t.Fatalf("creating future-expiry auth: %v", err)
+	}
+
+	// Expired
+	past := time.Now().Add(-1 * time.Hour)
+	_, err = storage.CreateAuthorization(tdb.DB, sk.KeyID, user.UserID,
+		[]string{"gamma"}, nil, nil, nil, &past)
+	if err != nil {
+		t.Fatalf("creating expired auth: %v", err)
+	}
+
+	auths, err := storage.FindAuthorizationsForKey(tdb.DB, sk.KeyID)
+	if err != nil {
+		t.Fatalf("finding authorizations: %v", err)
+	}
+	if len(auths) != 2 {
+		t.Fatalf("expected 2 active authorizations, got %d", len(auths))
+	}
+	for _, a := range auths {
+		for _, s := range a.Scopes {
+			if s == "gamma" {
+				t.Error("expired authorization was returned")
+			}
+		}
+	}
+}
+
 func TestRevokeAuthorization(t *testing.T) {
 	tdb := testDB(t)
 	user, sk := setupUserAndKey(t, tdb)

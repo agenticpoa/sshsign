@@ -57,12 +57,18 @@ func GetAuthorization(db *sql.DB, tokenID string) (*Authorization, error) {
 	return scanAuthorization(row)
 }
 
-// FindAuthorizationsForKey returns all active (non-revoked, non-expired) authorizations for a signing key.
+// FindAuthorizationsForKey returns all active (non-revoked, non-expired)
+// authorizations for a signing key. The expiry filter is defense-in-depth
+// — auth/engine.go re-checks expiry on each evaluation — but keeping
+// expired rows out of storage results shrinks the surface area passed
+// through to the decision engine.
 func FindAuthorizationsForKey(db *sql.DB, signingKeyID string) ([]Authorization, error) {
 	rows, err := db.Query(
 		`SELECT token_id, signing_key_id, granted_by, scopes, constraints, metadata_constraints, confirmation_tier, require_signature, hard_rules, soft_rules, expires_at, revoked_at, created_at
 		 FROM authorizations
-		 WHERE signing_key_id = ? AND revoked_at IS NULL
+		 WHERE signing_key_id = ?
+		   AND revoked_at IS NULL
+		   AND (expires_at IS NULL OR expires_at > datetime('now'))
 		 ORDER BY created_at`,
 		signingKeyID,
 	)

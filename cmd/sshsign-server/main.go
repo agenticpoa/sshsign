@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/agenticpoa/sshsign/internal/audit"
 	"github.com/agenticpoa/sshsign/internal/config"
@@ -81,13 +85,26 @@ func main() {
 		} else {
 			err = httpSrv.ListenAndServe()
 		}
-		if err != nil && err.Error() != "http: Server closed" {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("HTTP server error: %v", err)
 		}
 	}()
 
-	if err := server.Run(srv); err != nil {
-		log.Fatalf("server error: %v", err)
+	runErr := server.Run(srv)
+
+	// server.Run drained on SIGINT/SIGTERM. Give the HTTP server the
+	// same chance to finish in-flight approvals instead of dropping
+	// their TCP connections; without this the goroutine above would
+	// outlive the process briefly and any active cosign request would
+	// see a connection reset.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP server shutdown error: %v", err)
+	}
+
+	if runErr != nil {
+		log.Fatalf("server error: %v", runErr)
 	}
 }
 
