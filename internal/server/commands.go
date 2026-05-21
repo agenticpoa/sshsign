@@ -162,16 +162,23 @@ func pendingBindingFor(ps *storage.PendingSignature) apoacrypto.PendingBinding {
 	}
 }
 
-func logAudit(logger audit.Logger, entry audit.Entry) uint64 {
+// logAudit writes an audit entry and returns (txID, err). A nil logger
+// is treated as success with a zero txID — some flows (tests, denial
+// fallbacks) call logAudit when sc.Audit is not configured and don't
+// care whether anything was recorded. A non-nil error means the entry
+// did NOT make it into the log; the caller decides whether to fail
+// the request or proceed. Callers that don't care can ignore the
+// error explicitly with `_ =`.
+func logAudit(logger audit.Logger, entry audit.Entry) (uint64, error) {
 	if logger == nil {
-		return 0
+		return 0, nil
 	}
 	txID, err := logger.Log(entry)
 	if err != nil {
 		log.Printf("audit log error: %v", err)
-		return 0
+		return 0, err
 	}
-	return txID
+	return txID, nil
 }
 
 func sha256Hash(data []byte) string {

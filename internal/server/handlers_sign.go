@@ -147,8 +147,9 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 	if !decision.Allowed {
 		log.Printf("DENIED sign %s for %s key %s: %s", actionType, sc.User.UserID, sk.KeyID, decision.DenialReason)
 
-		// Audit log the denial
-		logAudit(sc.Audit, audit.Entry{
+		// Audit log the denial. Same posture as auditDenial: log
+		// failures locally but don't override the denial response.
+		_, _ = logAudit(sc.Audit, audit.Entry{
 			UserID:             sc.User.UserID,
 			SigningKeyID:       sk.KeyID,
 			ActionType:         actionType,
@@ -239,8 +240,10 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	// Audit log the successful signing
-	auditTxID := logAudit(sc.Audit, audit.Entry{
+	// Audit log the successful signing. We already gated on
+	// sc.Audit.Healthy() above, so a write failure here is transient
+	// — log and proceed rather than fail the user's signature.
+	auditTxID, _ := logAudit(sc.Audit, audit.Entry{
 		UserID:             sc.User.UserID,
 		SigningKeyID:       sk.KeyID,
 		ActionType:         actionType,

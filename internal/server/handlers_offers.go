@@ -88,12 +88,19 @@ func handleLogOffer(sess ssh.Session, sc *SessionContext, args []string) {
 		}
 	}
 
-	// Log to audit trail
-	auditTxID := logAudit(sc.Audit, audit.Entry{
+	// Log to audit trail. The audit txID is stored as the offer's
+	// previous_tx pointer for the next offer — without it the offer
+	// chain breaks, so a failure must surface to the caller rather
+	// than silently produce a chain with 0 links.
+	auditTxID, err := logAudit(sc.Audit, audit.Entry{
 		UserID:     sc.User.UserID,
 		ActionType: "negotiation-offer",
 		Result:     "LOGGED",
 	})
+	if err != nil {
+		writeJSON(sess, errorResponse{Error: fmt.Sprintf("audit log unavailable: %v", err)})
+		return
+	}
 
 	// Store the offer
 	offer, err := storage.CreateNegotiationOffer(

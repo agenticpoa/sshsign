@@ -169,8 +169,9 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	// Audit log the approval
-	auditTxID := logAudit(sc.Audit, audit.Entry{
+	// Audit log the approval. Already gated on Healthy() above; a
+	// failure here is transient. Log and proceed.
+	auditTxID, _ := logAudit(sc.Audit, audit.Entry{
 		UserID:             sc.User.UserID,
 		SigningKeyID:       sk.KeyID,
 		ActionType:         ps.DocType,

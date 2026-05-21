@@ -60,9 +60,11 @@ func decryptSigningKey(sess ssh.Session, sc *SessionContext, sk *storage.Signing
 // auditDenial emits a DENIED audit entry. Lifted so every handler that
 // rejects mid-flow uses the same field set and reason language stays
 // consistent across the codebase. Callers still write their own SSH
-// response and return after this.
+// response and return after this. The audit write failure is logged
+// but not surfaced: a denial that fails to record is strictly less
+// dangerous than a missing SIGNED entry.
 func auditDenial(sc *SessionContext, userID, signingKeyID, actionType, authTokenID, payloadHash, reason string) {
-	logAudit(sc.Audit, audit.Entry{
+	_, _ = logAudit(sc.Audit, audit.Entry{
 		UserID:             userID,
 		SigningKeyID:       signingKeyID,
 		ActionType:         actionType,

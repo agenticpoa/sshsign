@@ -239,7 +239,7 @@ func handleRevoke(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	logAudit(sc.Audit, audit.Entry{
+	_, _ = logAudit(sc.Audit, audit.Entry{
 		UserID:       sc.User.UserID,
 		SigningKeyID: keyID,
 		ActionType:   "revoke",
