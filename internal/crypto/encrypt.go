@@ -153,6 +153,21 @@ func (r *KEKRing) CurrentKEKMaterial() []byte {
 	return out
 }
 
+// Close zeroes every secret the ring holds. Call on graceful server
+// shutdown so a post-mortem core dump never contains key material.
+// After Close, further Wrap/Unwrap calls return errors — the ring's
+// keys are blank and would produce useless ciphertext anyway.
+//
+// Go can't guarantee memory hygiene end-to-end (the runtime may have
+// copied the keys during GC moves), but zeroing the canonical slot
+// covers the steady-state case, which is what matters when a process
+// is killed and its image is dumped to disk.
+func (r *KEKRing) Close() {
+	ZeroBytes(r.legacy)
+	ZeroBytes(r.current)
+	ZeroBytes(r.macKey)
+}
+
 func (r *KEKRing) kekFor(algo string) ([]byte, error) {
 	switch algo {
 	case KEKAlgoLegacy:

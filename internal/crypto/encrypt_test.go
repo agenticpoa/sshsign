@@ -288,6 +288,42 @@ func TestDeriveKEKArgon2id_RejectsShortSalt(t *testing.T) {
 	}
 }
 
+func TestKEKRing_CloseRendersUnwrapInert(t *testing.T) {
+	// After Close, the ring's keys are all zeros. Encrypting a DEK
+	// with the now-zeroed current key and then trying to decrypt with
+	// the still-live key from a sibling ring should fail — proving
+	// the slot in memory really was wiped.
+	ring, err := crypto.NewKEKRingForTests("test-secret")
+	if err != nil {
+		t.Fatalf("building ring: %v", err)
+	}
+	dek, _ := crypto.GenerateDEK()
+	wrapped, _, err := ring.WrapDEK(dek)
+	if err != nil {
+		t.Fatalf("WrapDEK: %v", err)
+	}
+
+	// Sibling ring (same secret) — unwraps fine before Close.
+	sibling, _ := crypto.NewKEKRingForTests("test-secret")
+	if _, err := sibling.UnwrapDEK(wrapped, crypto.KEKAlgoArgon2id); err != nil {
+		t.Fatalf("sanity unwrap before close: %v", err)
+	}
+
+	ring.Close()
+	// After Close, the same ring can no longer wrap usefully — the
+	// resulting ciphertext would decrypt with a zeroed key, which the
+	// sibling ring doesn't share.
+	wrappedAfterClose, _, err := ring.WrapDEK(dek)
+	if err != nil {
+		// AES with a zero key technically still produces ciphertext;
+		// the wrap call doesn't fail. What we care about is that the
+		// sibling — which holds the real key — can't decrypt it.
+		t.Logf("WrapDEK after Close: %v (acceptable)", err)
+	} else if _, err := sibling.UnwrapDEK(wrappedAfterClose, crypto.KEKAlgoArgon2id); err == nil {
+		t.Error("sibling unwrapped post-Close ciphertext; ring keys not actually zeroed")
+	}
+}
+
 func TestPendingMAC_RoundTrip(t *testing.T) {
 	ring, err := crypto.NewKEKRingForTests("test-secret")
 	if err != nil {

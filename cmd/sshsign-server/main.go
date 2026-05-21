@@ -108,6 +108,11 @@ func main() {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
 
+	// Zero the ring's key material so a post-mortem core dump never
+	// contains live KEKs. Done after HTTP shutdown so any in-flight
+	// approval that needed to unwrap a DEK has already finished.
+	kek.Close()
+
 	if runErr != nil {
 		log.Fatalf("server error: %v", runErr)
 	}
