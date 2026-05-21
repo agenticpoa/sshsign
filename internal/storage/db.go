@@ -3,7 +3,6 @@ package storage
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -35,73 +34,143 @@ func OpenMemory() (*sql.DB, error) {
 	return db, nil
 }
 
+// migration represents one ordered schema change. New columns/tables
+// land as a new entry at the end of [migrations]; the up SQL runs
+// exactly once per database, gated by the schema_migrations table.
+type migration struct {
+	version int
+	name    string
+	up      string
+}
+
+// migrations is the ordered history of schema changes. Earlier entries
+// must never be edited after release — that would mutate the schema
+// silently on long-running databases. Append new versions instead.
+//
+// v1 carries the current full schema as a single block (CREATE TABLE
+// IF NOT EXISTS for every table). Legacy DBs are baselined into v1 on
+// first run after this code lands so the loop of opportunistic
+// ALTER-TABLE-ADD-COLUMN calls can retire.
+var migrations = []migration{
+	{version: 1, name: "initial_schema", up: schemaV1},
+}
+
+// Migrate brings the database up to the latest known schema version.
+// Safe to call on fresh, legacy (pre-versioning), and already-migrated
+// databases — see baselineIfLegacy for how existing column-migration
+// DBs roll forward without re-running the ALTERs.
 func Migrate(db *sql.DB) error {
-	_, err := db.Exec(schema)
-	if err != nil {
-		return fmt.Errorf("running migrations: %w", err)
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version    INTEGER PRIMARY KEY,
+		name       TEXT NOT NULL,
+		applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`); err != nil {
+		return fmt.Errorf("creating schema_migrations: %w", err)
 	}
 
-	// Run column migrations for existing databases.
-	// ALTER TABLE ADD COLUMN is a no-op if the column already exists in SQLite
-	// when we ignore the "duplicate column" error.
-	columnMigrations := []string{
-		`ALTER TABLE authorizations ADD COLUMN metadata_constraints TEXT NOT NULL DEFAULT '[]'`,
-		`ALTER TABLE authorizations ADD COLUMN confirmation_tier TEXT NOT NULL DEFAULT 'autonomous'`,
-		`ALTER TABLE signing_keys ADD COLUMN sign_count INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE signing_keys ADD COLUMN last_used_at TEXT`,
-		`ALTER TABLE authorizations ADD COLUMN require_signature BOOLEAN NOT NULL DEFAULT 0`,
-		`ALTER TABLE pending_signatures ADD COLUMN approval_token TEXT`,
-		`ALTER TABLE pending_signatures ADD COLUMN signing_session_id TEXT`,
-		`ALTER TABLE pending_signatures ADD COLUMN signature TEXT`,
-		`ALTER TABLE signing_sessions ADD COLUMN view_token TEXT`,
-		`ALTER TABLE signing_sessions ADD COLUMN group_chat_id INTEGER`,
-		// P7-5: durable founder-wait. Creator sets founder_resumed_at
-		// on resume; founder_streaming_at once _stream_to_telegram is
-		// actually running. Investor polls on founder_streaming_at
-		// (not resumed_at) so a crash between the two is recoverable.
-		`ALTER TABLE signing_session_members ADD COLUMN founder_resumed_at INTEGER`,
-		`ALTER TABLE signing_session_members ADD COLUMN founder_streaming_at INTEGER`,
-		// Inverted-invitation: each member's own Telegram bot handle.
-		// Member self-writes their own row at create-session (founder)
-		// and join-session (investor). Used by the OTHER side to
-		// compose attribution-correct UI cards (create-group hint,
-		// rejection redirects, waiting card).
-		`ALTER TABLE signing_session_members ADD COLUMN bot_handle TEXT`,
-		// Telegram recovery: each member's own Telegram DM/user id.
-		// Member self-writes their row so any future workflow turn can
-		// reconstruct local state from sshsign instead of depending on
-		// a tiny local pointer file.
-		`ALTER TABLE signing_session_members ADD COLUMN telegram_user_id TEXT`,
-		// KEK migration: tag each signing_keys row with the algorithm
-		// used to derive the KEK that wraps its DEK. NULL/empty = legacy
-		// SHA-256 derivation (pre-migration rows); "argon2id" = new rows
-		// wrapped under the Argon2id-derived KEK. Lets a single server
-		// instance read both during the migration window.
-		`ALTER TABLE signing_keys ADD COLUMN kek_algo TEXT NOT NULL DEFAULT ''`,
-		// Cosign tamper-evidence: HMAC over (signing_key_id, auth_token_id,
-		// requester_id, doc_type, payload_hash, metadata) keyed by an
-		// HKDF-derived server key. Verified at approval time so a tampered
-		// DB cannot trick a human into approving a different document
-		// than the one they reviewed. Pre-migration rows store NULL and
-		// are rejected on cosign — by design, no silent downgrade.
-		`ALTER TABLE pending_signatures ADD COLUMN pending_mac BLOB`,
+	if err := baselineIfLegacy(db); err != nil {
+		return fmt.Errorf("baselining legacy schema: %w", err)
 	}
-	for _, m := range columnMigrations {
-		_, err := db.Exec(m)
-		if err != nil && !isColumnExistsError(err) {
-			return fmt.Errorf("running column migration: %w", err)
+
+	applied, err := loadAppliedVersions(db)
+	if err != nil {
+		return fmt.Errorf("loading applied versions: %w", err)
+	}
+
+	for _, m := range migrations {
+		if applied[m.version] {
+			continue
+		}
+		if err := runMigration(db, m); err != nil {
+			return err
 		}
 	}
-
 	return nil
 }
 
-func isColumnExistsError(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists")
+func runMigration(db *sql.DB, m migration) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx for v%d (%s): %w", m.version, m.name, err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.Exec(m.up); err != nil {
+		return fmt.Errorf("running migration v%d (%s): %w", m.version, m.name, err)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO schema_migrations (version, name) VALUES (?, ?)`,
+		m.version, m.name,
+	); err != nil {
+		return fmt.Errorf("recording migration v%d: %w", m.version, err)
+	}
+	return tx.Commit()
 }
 
-const schema = `
+func loadAppliedVersions(db *sql.DB) (map[int]bool, error) {
+	rows, err := db.Query(`SELECT version FROM schema_migrations`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	applied := make(map[int]bool)
+	for rows.Next() {
+		var v int
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		applied[v] = true
+	}
+	return applied, rows.Err()
+}
+
+// baselineIfLegacy detects a pre-versioning database — one created by
+// the old opportunistic ALTER-TABLE-on-every-startup scheme — and
+// records every known migration as applied without re-running it. The
+// signal is "schema_migrations is empty but the users table already
+// exists." Fresh databases have neither, and roll through the normal
+// migration path. Already-versioned databases have applied rows and
+// skip this entirely.
+func baselineIfLegacy(db *sql.DB) error {
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	var name string
+	err := db.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type='table' AND name='users'`,
+	).Scan(&name)
+	if err == sql.ErrNoRows {
+		return nil // fresh database, let migrations run from v1
+	}
+	if err != nil {
+		return err
+	}
+
+	// Legacy DB. Mark every known migration applied so we don't try to
+	// re-create tables or re-add columns that the old loop already put
+	// in place.
+	for _, m := range migrations {
+		if _, err := db.Exec(
+			`INSERT INTO schema_migrations (version, name) VALUES (?, ?)`,
+			m.version, m.name,
+		); err != nil {
+			return fmt.Errorf("baselining v%d: %w", m.version, err)
+		}
+	}
+	return nil
+}
+
+// schemaV1 is the current full schema as of the migration-versioning
+// switch. New tables and columns live here for fresh databases; for
+// long-running databases, additive changes go in as new migration
+// entries appended to [migrations].
+const schemaV1 = `
 CREATE TABLE IF NOT EXISTS users (
 	user_id    TEXT PRIMARY KEY,
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -124,7 +193,10 @@ CREATE TABLE IF NOT EXISTS signing_keys (
 	private_key_encrypted BLOB NOT NULL,
 	dek_encrypted         BLOB NOT NULL,
 	created_at            TEXT NOT NULL DEFAULT (datetime('now')),
-	revoked_at            TEXT
+	revoked_at            TEXT,
+	sign_count            INTEGER NOT NULL DEFAULT 0,
+	last_used_at          TEXT,
+	kek_algo              TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS authorizations (
@@ -135,6 +207,7 @@ CREATE TABLE IF NOT EXISTS authorizations (
 	constraints           TEXT NOT NULL DEFAULT '{}',
 	metadata_constraints  TEXT NOT NULL DEFAULT '[]',
 	confirmation_tier     TEXT NOT NULL DEFAULT 'autonomous',
+	require_signature     BOOLEAN NOT NULL DEFAULT 0,
 	hard_rules            TEXT NOT NULL DEFAULT '[]',
 	soft_rules            TEXT NOT NULL DEFAULT '[]',
 	expires_at            TEXT,
@@ -143,17 +216,21 @@ CREATE TABLE IF NOT EXISTS authorizations (
 );
 
 CREATE TABLE IF NOT EXISTS pending_signatures (
-	id              TEXT PRIMARY KEY,
-	signing_key_id  TEXT NOT NULL REFERENCES signing_keys(key_id),
-	auth_token_id   TEXT NOT NULL REFERENCES authorizations(token_id),
-	requester_id    TEXT NOT NULL REFERENCES users(user_id),
-	doc_type        TEXT NOT NULL,
-	payload_hash    TEXT NOT NULL,
-	metadata        TEXT,
-	status          TEXT NOT NULL DEFAULT 'pending',
-	created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-	resolved_at     TEXT,
-	resolved_by     TEXT
+	id                  TEXT PRIMARY KEY,
+	signing_key_id      TEXT NOT NULL REFERENCES signing_keys(key_id),
+	auth_token_id       TEXT NOT NULL REFERENCES authorizations(token_id),
+	requester_id        TEXT NOT NULL REFERENCES users(user_id),
+	doc_type            TEXT NOT NULL,
+	payload_hash        TEXT NOT NULL,
+	metadata            TEXT,
+	status              TEXT NOT NULL DEFAULT 'pending',
+	approval_token      TEXT,
+	signing_session_id  TEXT,
+	signature           TEXT,
+	pending_mac         BLOB,
+	created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+	resolved_at         TEXT,
+	resolved_by         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS negotiation_offers (
@@ -178,12 +255,6 @@ CREATE TABLE IF NOT EXISTS evidence_envelopes (
 	created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- signing_sessions: multi-party signing coordination record. A session
--- groups two or more parties who will jointly sign a document (SAFE,
--- NDA, employment offer, etc). Deliberately use-case-agnostic — metadata
--- is opaque JSON. Self-contained — no FKs into pending_signatures (soft
--- correlation via session_id only) so future extraction to a standalone
--- service is a clean package move.
 CREATE TABLE IF NOT EXISTS signing_sessions (
 	session_id         TEXT PRIMARY KEY,
 	session_code       TEXT NOT NULL UNIQUE,
@@ -211,16 +282,9 @@ CREATE TABLE IF NOT EXISTS signing_session_members (
 	apoa_pubkey_pem       TEXT NOT NULL,
 	party_did             TEXT NOT NULL DEFAULT '',
 	joined_at             TEXT NOT NULL DEFAULT (datetime('now')),
-	-- P7-5 durable founder-wait fields (unix epoch seconds, NULL until set
-	-- by the creator via update-session-member). See columnMigrations for
-	-- the migration path applied to existing databases.
 	founder_resumed_at    INTEGER,
 	founder_streaming_at  INTEGER,
-	-- Inverted-invitation: each member's own Telegram bot handle. NULL
-	-- until the member's own bot writes it (member-self-write ACL).
 	bot_handle            TEXT,
-	-- Telegram recovery: member's own DM/user id, self-written by the
-	-- member's bot so local state can be reconstructed from sshsign.
 	telegram_user_id      TEXT,
 	PRIMARY KEY (session_id, user_id)
 );
@@ -253,8 +317,6 @@ CREATE TABLE IF NOT EXISTS signing_session_deliveries (
 
 CREATE INDEX IF NOT EXISTS idx_session_deliveries_session ON signing_session_deliveries(session_id);
 
--- signing_session_audit: append-only log of session state transitions.
--- Powers the audit-session command and user-facing audit URLs.
 CREATE TABLE IF NOT EXISTS signing_session_audit (
 	id          INTEGER PRIMARY KEY AUTOINCREMENT,
 	session_id  TEXT NOT NULL REFERENCES signing_sessions(session_id),
@@ -266,11 +328,6 @@ CREATE TABLE IF NOT EXISTS signing_session_audit (
 
 CREATE INDEX IF NOT EXISTS idx_session_audit_session ON signing_session_audit(session_id, created_at);
 
--- server_config: singleton row (id = 1) carrying values the server needs
--- to be the same across restarts. Currently only kek_salt, the salt used
--- by the Argon2id KEK derivation. Persisted in the same DB so taking a
--- backup of the DB also captures the salt — losing it would render every
--- wrapped DEK irrecoverable.
 CREATE TABLE IF NOT EXISTS server_config (
 	id          INTEGER PRIMARY KEY CHECK (id = 1),
 	kek_salt    BLOB NOT NULL,
