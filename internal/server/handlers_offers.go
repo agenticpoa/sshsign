@@ -41,6 +41,14 @@ func handleLogOffer(sess ssh.Session, sc *SessionContext, args []string) {
 		case "--metadata":
 			i++
 			metadata = parseJSONArg(args, &i)
+		case "--metadata-b64":
+			i++
+			decoded, err := decodeB64JSON(args[i])
+			if err != nil {
+				writeJSON(sess, errorResponse{Error: fmt.Sprintf("--metadata-b64: %v", err)})
+				return
+			}
+			metadata = decoded
 		case "--previous-tx":
 			fmt.Sscanf(args[i+1], "%d", &previousTx)
 			i++

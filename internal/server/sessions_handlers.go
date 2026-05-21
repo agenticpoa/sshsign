@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -927,16 +926,11 @@ func resolveB64Metadata(flags map[string]string, key string) error {
 	if _, both := flags[key]; both {
 		return fmt.Errorf("cannot set both --%s and --%s", key, b64Key)
 	}
-	decoded, err := base64.URLEncoding.DecodeString(encoded)
+	decoded, err := decodeB64JSON(encoded)
 	if err != nil {
-		// Try standard encoding as a forgiving fallback — clients that
-		// forget to swap + for - shouldn't get a cryptic error.
-		decoded, err = base64.StdEncoding.DecodeString(encoded)
-		if err != nil {
-			return fmt.Errorf("invalid base64 for --%s: %v", b64Key, err)
-		}
+		return fmt.Errorf("--%s: %v", b64Key, err)
 	}
-	flags[key] = string(decoded)
+	flags[key] = decoded
 	delete(flags, b64Key)
 	return nil
 }

@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -59,6 +60,27 @@ func isFlag(s string) bool {
 // SSH command parsing strips inner double quotes, so {"key":1} arrives as {key:1}.
 func fixBareJSONKeys(s string) string {
 	return bareKeyRe.ReplaceAllString(s, `$1"$2":`)
+}
+
+// decodeB64JSON decodes a base64-encoded JSON payload. The encoding
+// is the universal escape hatch for JSON flags: SSH argv strips inner
+// double quotes and the fixBareJSONKeys regex only repairs bare keys,
+// not bare string values — so `{"firm":"Blue Fund"}` mangles to
+// `{firm:Blue Fund}` and won't parse. Callers can instead send the
+// flag's `-b64` variant carrying URL-safe (or standard) base64 of the
+// JSON text, which is a whitespace-free alphabet SSH transports
+// opaquely.
+func decodeB64JSON(encoded string) (string, error) {
+	decoded, err := base64.URLEncoding.DecodeString(encoded)
+	if err != nil {
+		// Forgive callers that forgot to swap + for - in URL-safe
+		// encoding by falling back to standard base64.
+		decoded, err = base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return "", fmt.Errorf("invalid base64: %v", err)
+		}
+	}
+	return string(decoded), nil
 }
 
 // JSON response types for the programmatic interface.

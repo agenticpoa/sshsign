@@ -73,6 +73,16 @@ func handleCreateKey(sess ssh.Session, sc *SessionContext, args []string) {
 				i++
 				constraintsJSON = parseJSONArg(args, &i)
 			}
+		case "--constraints-b64":
+			if i+1 < len(args) {
+				i++
+				decoded, err := decodeB64JSON(args[i])
+				if err != nil {
+					writeJSON(sess, errorResponse{Error: fmt.Sprintf("--constraints-b64: %v", err)})
+					return
+				}
+				constraintsJSON = decoded
+			}
 		}
 	}
 

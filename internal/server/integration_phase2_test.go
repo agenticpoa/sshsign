@@ -1,8 +1,9 @@
 package server_test
 
 import (
-	"context"
 	"bytes"
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -145,6 +146,41 @@ func TestSignAndVerifyEndToEnd(t *testing.T) {
 	}
 
 	t.Logf("signed with key %s, token %s", signResp.KeyID, signResp.TokenID)
+}
+
+func TestSign_MetadataB64SurvivesArgvMangling(t *testing.T) {
+	// SSH strips inner double quotes from argv and splits on spaces, so
+	// a literal --metadata flag carrying JSON with string values that
+	// contain spaces fails to parse. The --metadata-b64 escape hatch
+	// takes URL-safe base64 of the same JSON, which transports
+	// opaquely through argv.
+	ts := setupTestServer(t)
+	signer, _, keyID := setupUserWithSigningKeyAndAuth(t, ts,
+		[]string{"git-commit"},
+		nil, nil, nil,
+	)
+
+	metadataJSON := `{"company_name":"Acme Holdings Inc","ticker":"ACME"}`
+	encoded := base64.URLEncoding.EncodeToString([]byte(metadataJSON))
+
+	payload := []byte("test commit body")
+	cmd := "sign --type git-commit --key-id " + keyID + " --metadata-b64 " + encoded
+	output, err := sshClientWithStdin(t, ts.addr, signer, cmd, payload)
+	if err != nil {
+		t.Logf("output: %s", output)
+		t.Fatalf("sign with --metadata-b64 failed: %v", err)
+	}
+	var resp struct {
+		Signature string `json:"signature"`
+		Error     string `json:"error"`
+	}
+	mustUnmarshal(t, output, &resp)
+	if resp.Error != "" {
+		t.Fatalf("sign returned error: %s", resp.Error)
+	}
+	if resp.Signature == "" {
+		t.Error("expected signature, got empty")
+	}
 }
 
 func TestSignDeniedWrongScope(t *testing.T) {
