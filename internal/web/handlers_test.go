@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -195,6 +196,33 @@ func TestPostApproval_AlreadyResolved(t *testing.T) {
 
 	if w.Code != http.StatusConflict {
 		t.Errorf("expected 409, got %d", w.Code)
+	}
+}
+
+func TestPostApproval_RejectsOversizedImage(t *testing.T) {
+	srv, ps := setupTest(t)
+
+	// Build a base64-encoded payload that exceeds maxImageSize after
+	// decode. 700KB of source decodes to ~525KB, comfortably past the
+	// 500KB cap. Prefix the PNG magic so the header check inside the
+	// handler doesn't short-circuit before the size check runs.
+	const target = 700 * 1024
+	raw := make([]byte, target)
+	raw[0], raw[1], raw[2], raw[3] = 0x89, 'P', 'N', 'G'
+	encoded := base64.StdEncoding.EncodeToString(raw)
+	body := `{"signature_image": "data:image/png;base64,` + encoded + `"}`
+
+	req := httptest.NewRequest("POST", "/approve/"+ps.ID+"?token=testtoken123", strings.NewReader(body))
+	req.SetPathValue("pendingID", ps.ID)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handlePostApproval(w, req)
+
+	// Either 413 (size check fires) or 400 (MaxBytesReader truncates
+	// before we get to the size check) is acceptable. The thing that
+	// must NOT happen is a 2xx accept.
+	if w.Code/100 == 2 {
+		t.Errorf("oversized payload accepted with status %d", w.Code)
 	}
 }
 
