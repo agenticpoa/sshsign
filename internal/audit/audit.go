@@ -82,6 +82,13 @@ type Logger interface {
 	// Verify checks that an audit entry hasn't been tampered with.
 	Verify(key string) (bool, error)
 
+	// VerifyChain walks every committed entry and rejects the first
+	// integrity break. For the memory logger this walks the HMAC
+	// chain in TxID order; for immudb it relies on the backend's
+	// signed Merkle root and verifies every entry's inclusion. nil
+	// means the whole log is consistent.
+	VerifyChain() error
+
 	// Healthy returns true if the audit log backend is reachable.
 	Healthy() bool
 

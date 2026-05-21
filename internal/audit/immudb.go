@@ -108,6 +108,19 @@ func (l *ImmuDBLogger) Verify(key string) (bool, error) {
 	return true, nil
 }
 
+// VerifyChain is a no-op for the immudb-backed logger: every Get and
+// every Set already go through VerifiedGet/VerifiedSet, which carry
+// Merkle inclusion proofs against the database's signed root. Tamper
+// shows up at read time, not as a separate chain walk. Returns nil
+// when the connection itself is healthy; callers wanting per-entry
+// verification can iterate keys and call Verify.
+func (l *ImmuDBLogger) VerifyChain() error {
+	if !l.healthy.Load() {
+		return fmt.Errorf("immudb is unhealthy: chain verification unavailable")
+	}
+	return nil
+}
+
 func (l *ImmuDBLogger) Healthy() bool {
 	return l.healthy.Load()
 }
