@@ -148,7 +148,7 @@ func marshalSession(sess *sessions.Session, members []sessions.Member, includeMe
 // --apoa-pubkey PEM [--party-did DID] [--metadata-public JSON]
 // [--metadata-member JSON] [--ttl 86400]`
 func handleCreateSession(sess ssh.Session, sc *SessionContext, args []string) {
-	if sc.RateLimits != nil && sc.RateLimits.SessionMutation != nil && !sc.RateLimits.SessionMutation.Allow(sc.User.UserID) {
+	if sc.RateLimits != nil && sc.RateLimits.SessionMutation != nil && sc.RateLimits.SessionMutation.Allow(sc.User.UserID) != nil {
 		writeJSON(sess, errorResponse{Error: "rate limit exceeded: too many session operations"})
 		return
 	}
@@ -196,7 +196,7 @@ func handleCreateSession(sess ssh.Session, sc *SessionContext, args []string) {
 // handleJoinSession: `join-session --session-code CODE --role ROLE
 // --apoa-pubkey PEM [--party-did DID]`
 func handleJoinSession(sess ssh.Session, sc *SessionContext, args []string) {
-	if sc.RateLimits != nil && sc.RateLimits.SessionMutation != nil && !sc.RateLimits.SessionMutation.Allow(sc.User.UserID) {
+	if sc.RateLimits != nil && sc.RateLimits.SessionMutation != nil && sc.RateLimits.SessionMutation.Allow(sc.User.UserID) != nil {
 		writeJSON(sess, errorResponse{Error: "rate limit exceeded: too many session operations"})
 		return
 	}
@@ -281,7 +281,7 @@ func handleGetSession(sess ssh.Session, sc *SessionContext, args []string) {
 // `--rescind` produces the rescinded_after_sign state (caller signals the
 // session had progressed past the signing step before cancellation).
 func handleCancelSession(sess ssh.Session, sc *SessionContext, args []string) {
-	if sc.RateLimits != nil && sc.RateLimits.SessionMutation != nil && !sc.RateLimits.SessionMutation.Allow(sc.User.UserID) {
+	if sc.RateLimits != nil && sc.RateLimits.SessionMutation != nil && sc.RateLimits.SessionMutation.Allow(sc.User.UserID) != nil {
 		writeJSON(sess, errorResponse{Error: "rate limit exceeded: too many session operations"})
 		return
 	}
@@ -315,7 +315,7 @@ func handleCancelSession(sess ssh.Session, sc *SessionContext, args []string) {
 // Creator-only; requires a live creator/finalize lease so stale workers
 // cannot complete a session after another process has taken over.
 func handleCompleteSession(sess ssh.Session, sc *SessionContext, args []string) {
-	if sc.RateLimits != nil && sc.RateLimits.SessionMutation != nil && !sc.RateLimits.SessionMutation.Allow(sc.User.UserID) {
+	if sc.RateLimits != nil && sc.RateLimits.SessionMutation != nil && sc.RateLimits.SessionMutation.Allow(sc.User.UserID) != nil {
 		writeJSON(sess, errorResponse{Error: "rate limit exceeded: too many session operations"})
 		return
 	}

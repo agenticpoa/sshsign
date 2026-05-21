@@ -3,6 +3,8 @@ package sessions
 import (
 	"errors"
 	"time"
+
+	"github.com/agenticpoa/sshsign/internal/ratelimit"
 )
 
 // Status values for a signing session. Immutable transitions — once a
@@ -41,7 +43,10 @@ var (
 	ErrTerminal      = errors.New("session is in a terminal state")
 	ErrExpired       = errors.New("session has expired")
 	ErrCodeCollision = errors.New("session_code collision after retries")
-	ErrRateLimit     = errors.New("rate limit exceeded")
+	// ErrRateLimit aliases the canonical sentinel in internal/ratelimit
+	// so existing callers using errors.Is(err, sessions.ErrRateLimit)
+	// keep working after the limiter rehome.
+	ErrRateLimit = ratelimit.ErrRateLimit
 	ErrInvalidStatus = errors.New("invalid status transition")
 	// ErrGroupAlreadyBound is returned by BindGroup when the session is
 	// already bound to a different group_chat_id. Write-once semantics:

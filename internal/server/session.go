@@ -4,12 +4,14 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
 
 	"github.com/agenticpoa/sshsign/internal/audit"
 	apoacrypto "github.com/agenticpoa/sshsign/internal/crypto"
+	"github.com/agenticpoa/sshsign/internal/ratelimit"
 	"github.com/agenticpoa/sshsign/internal/sessions"
 	"github.com/agenticpoa/sshsign/internal/storage"
 )
@@ -22,7 +24,7 @@ type SessionContext struct {
 	UserKey               *storage.UserKey
 	IsNewUser             bool
 	RateLimits            *ServerRateLimits
-	GetSessionRateLimiter *sessions.GetSessionRateLimiter
+	GetSessionRateLimiter ratelimit.Limiter
 	Audit                 audit.Logger
 	HTTPDomain            string // domain for web approval URLs
 }
@@ -125,7 +127,7 @@ func CommandHandler(sess ssh.Session, sc *SessionContext) {
 func SessionHandler(db *sql.DB, kek *apoacrypto.KEKRing, rl *ServerRateLimits, auditLog audit.Logger, httpDomain string) func(next ssh.Handler) ssh.Handler {
 	// Long-lived, shared across all SSH connections — per-user counters
 	// live inside the limiter and are keyed by sshsign user_id.
-	getSessionLimiter := sessions.NewGetSessionRateLimiter()
+	getSessionLimiter := ratelimit.NewSlidingWindow(sessions.MaxGetSessionCallsPerHour, time.Hour)
 
 	return func(next ssh.Handler) ssh.Handler {
 		return func(sess ssh.Session) {

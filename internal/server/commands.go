@@ -201,7 +201,7 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 
 	// Check server-level rate limit
-	if sc.RateLimits != nil && !sc.RateLimits.SigningRequests.Allow(sc.User.UserID) {
+	if sc.RateLimits != nil && sc.RateLimits.SigningRequests.Allow(sc.User.UserID) != nil {
 		writeJSON(sess, errorResponse{Error: "rate limit exceeded: too many signing requests"})
 		return
 	}
@@ -490,7 +490,7 @@ func handleKeys(sess ssh.Session, sc *SessionContext) {
 // handleCreateKey processes: ssh host create-key --scope <scope> [--tier autonomous|cosign] [--expiry 30] [--constraints '{...}']
 // Generates a new signing key and authorization in one step.
 func handleCreateKey(sess ssh.Session, sc *SessionContext, args []string) {
-	if sc.RateLimits != nil && sc.RateLimits.KeyCreation != nil && !sc.RateLimits.KeyCreation.Allow(sc.User.UserID) {
+	if sc.RateLimits != nil && sc.RateLimits.KeyCreation != nil && sc.RateLimits.KeyCreation.Allow(sc.User.UserID) != nil {
 		writeJSON(sess, errorResponse{Error: "rate limit exceeded: too many key creation requests"})
 		return
 	}
@@ -1091,7 +1091,7 @@ func handleDeny(sess ssh.Session, sc *SessionContext, args []string) {
 
 // handleLogOffer logs a structured negotiation offer to the audit trail.
 func handleLogOffer(sess ssh.Session, sc *SessionContext, args []string) {
-	if sc.RateLimits != nil && sc.RateLimits.OfferMutation != nil && !sc.RateLimits.OfferMutation.Allow(sc.User.UserID) {
+	if sc.RateLimits != nil && sc.RateLimits.OfferMutation != nil && sc.RateLimits.OfferMutation.Allow(sc.User.UserID) != nil {
 		writeJSON(sess, errorResponse{Error: "rate limit exceeded: too many offer operations"})
 		return
 	}
