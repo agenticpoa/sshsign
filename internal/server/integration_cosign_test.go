@@ -87,14 +87,14 @@ func TestCosignFlow_ApproveProducesSignature(t *testing.T) {
 	var pendingResp struct {
 		PendingID string `json:"pending_id"`
 	}
-	json.Unmarshal([]byte(signOutput), &pendingResp)
+	mustUnmarshal(t, signOutput, &pendingResp)
 
 	// Check pending list
 	pendingOutput, _ := sshClient(t, ts.addr, signer, "pending")
 	var pendingList []struct {
 		ID string `json:"id"`
 	}
-	json.Unmarshal([]byte(pendingOutput), &pendingList)
+	mustUnmarshal(t, pendingOutput, &pendingList)
 	if len(pendingList) != 1 {
 		t.Fatalf("expected 1 pending signature, got %d", len(pendingList))
 	}
@@ -188,7 +188,7 @@ func TestCosignFlow_RejectsRowWithoutMAC(t *testing.T) {
 	var pendingResp struct {
 		PendingID string `json:"pending_id"`
 	}
-	json.Unmarshal([]byte(signOutput), &pendingResp)
+	mustUnmarshal(t, signOutput, &pendingResp)
 
 	// Simulate a pre-migration row: clear the MAC. Approve must refuse
 	// rather than silently downgrade to "no integrity check."
@@ -204,7 +204,7 @@ func TestCosignFlow_RejectsRowWithoutMAC(t *testing.T) {
 		Signature string `json:"signature"`
 		Error     string `json:"error"`
 	}
-	json.Unmarshal([]byte(approveOutput), &approveResp)
+	mustUnmarshal(t, approveOutput, &approveResp)
 	if approveResp.Signature != "" {
 		t.Fatal("approve produced a signature against a row with no MAC")
 	}
@@ -225,7 +225,7 @@ func TestCosignFlow_DenyIsLogged(t *testing.T) {
 	var pendingResp struct {
 		PendingID string `json:"pending_id"`
 	}
-	json.Unmarshal([]byte(signOutput), &pendingResp)
+	mustUnmarshal(t, signOutput, &pendingResp)
 
 	// Deny
 	denyOutput, _ := sshClient(t, ts.addr, signer, "deny --id "+pendingResp.PendingID)
@@ -234,7 +234,7 @@ func TestCosignFlow_DenyIsLogged(t *testing.T) {
 		Status    string `json:"status"`
 		PendingID string `json:"pending_id"`
 	}
-	json.Unmarshal([]byte(denyOutput), &denyResp)
+	mustUnmarshal(t, denyOutput, &denyResp)
 
 	if denyResp.Status != "denied" {
 		t.Errorf("expected status 'denied', got %q", denyResp.Status)
@@ -267,7 +267,7 @@ func TestCosignFlow_ApproveAfterKeyRevoke(t *testing.T) {
 	var pendingResp struct {
 		PendingID string `json:"pending_id"`
 	}
-	json.Unmarshal([]byte(signOutput), &pendingResp)
+	mustUnmarshal(t, signOutput, &pendingResp)
 
 	// Revoke the signing key
 	storage.RevokeSigningKey(context.Background(), ts.db.DB, keyID)
@@ -278,7 +278,7 @@ func TestCosignFlow_ApproveAfterKeyRevoke(t *testing.T) {
 	var resp struct {
 		Error string `json:"error"`
 	}
-	json.Unmarshal([]byte(approveOutput), &resp)
+	mustUnmarshal(t, approveOutput, &resp)
 
 	if !strings.Contains(resp.Error, "revoked") {
 		t.Errorf("expected revoked error, got: %s", resp.Error)
@@ -298,7 +298,7 @@ func TestCosignFlow_ApproveByWrongUser(t *testing.T) {
 	var pendingResp struct {
 		PendingID string `json:"pending_id"`
 	}
-	json.Unmarshal([]byte(signOutput), &pendingResp)
+	mustUnmarshal(t, signOutput, &pendingResp)
 
 	// User B tries to approve
 	signerB, _ := generateTestSSHKey(t)
@@ -309,7 +309,7 @@ func TestCosignFlow_ApproveByWrongUser(t *testing.T) {
 	var resp struct {
 		Error string `json:"error"`
 	}
-	json.Unmarshal([]byte(approveOutput), &resp)
+	mustUnmarshal(t, approveOutput, &resp)
 
 	if !strings.Contains(resp.Error, "principal") {
 		t.Errorf("expected principal error, got: %s", resp.Error)

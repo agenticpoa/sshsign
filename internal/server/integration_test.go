@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"net"
 	"testing"
@@ -83,6 +84,17 @@ func setupTestServer(t *testing.T) *testServer {
 	})
 
 	return &testServer{addr: addr, db: db, kek: kek, auditLog: auditLog}
+}
+
+// mustUnmarshal parses raw into v or fails the test with the raw
+// payload included. Use everywhere instead of bare json.Unmarshal so
+// the test failure carries the actual server response when a handler
+// returns an error string where the test expected a structured reply.
+func mustUnmarshal(t *testing.T, raw string, v any) {
+	t.Helper()
+	if err := json.Unmarshal([]byte(raw), v); err != nil {
+		t.Fatalf("parse JSON: %v\nraw: %s", err, raw)
+	}
 }
 
 func generateTestSSHKey(t *testing.T) (gossh.Signer, ed25519.PublicKey) {

@@ -1,7 +1,6 @@
 package server_test
 
 import (
-	"encoding/json"
 	"testing"
 )
 
@@ -27,7 +26,7 @@ func TestAuditEntryOnSign(t *testing.T) {
 		AuditTxID uint64 `json:"audit_tx_id"`
 		Error     string `json:"error"`
 	}
-	json.Unmarshal([]byte(output), &signResp)
+	mustUnmarshal(t, output, &signResp)
 	if signResp.Error != "" {
 		t.Fatalf("sign returned error: %s", signResp.Error)
 	}
@@ -150,7 +149,7 @@ func TestSignFailsWhenAuditUnhealthy(t *testing.T) {
 	output, _ := sshClientWithStdin(t, ts.addr, signer, signCmd, payload)
 
 	var resp struct{ Error string }
-	json.Unmarshal([]byte(output), &resp)
+	mustUnmarshal(t, output, &resp)
 	if resp.Error == "" {
 		t.Error("expected error when audit log is unhealthy")
 	}
@@ -164,7 +163,7 @@ func TestSignFailsWhenAuditUnhealthy(t *testing.T) {
 		Signature string `json:"signature"`
 		Error     string `json:"error"`
 	}
-	json.Unmarshal([]byte(output2), &resp2)
+	mustUnmarshal(t, output2, &resp2)
 	if resp2.Error != "" {
 		t.Errorf("expected signing to work after audit recovery, got: %s", resp2.Error)
 	}
@@ -187,7 +186,7 @@ func TestAuditNoGapsUnderLoad(t *testing.T) {
 		output, _ := sshClientWithStdin(t, ts.addr, signer, signCmd, payload)
 
 		var resp struct{ Error string }
-		json.Unmarshal([]byte(output), &resp)
+		mustUnmarshal(t, output, &resp)
 		if resp.Error != "" {
 			t.Fatalf("sign %d failed: %s", i, resp.Error)
 		}

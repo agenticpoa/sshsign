@@ -72,7 +72,7 @@ func TestLogOffer_SequenceAndChain(t *testing.T) {
 		ImmudbTx uint64 `json:"immudb_tx"`
 		Round    int    `json:"round"`
 	}
-	json.Unmarshal([]byte(out2), &resp2)
+	mustUnmarshal(t, out2, &resp2)
 	tx2 := resp2.ImmudbTx
 
 	// Offer 3: founder counter
@@ -82,7 +82,7 @@ func TestLogOffer_SequenceAndChain(t *testing.T) {
 	var resp3 struct {
 		ImmudbTx uint64 `json:"immudb_tx"`
 	}
-	json.Unmarshal([]byte(out3), &resp3)
+	mustUnmarshal(t, out3, &resp3)
 	tx3 := resp3.ImmudbTx
 
 	// Offer 4: investor accept
@@ -92,7 +92,7 @@ func TestLogOffer_SequenceAndChain(t *testing.T) {
 	var resp4 struct {
 		ImmudbTx uint64 `json:"immudb_tx"`
 	}
-	json.Unmarshal([]byte(out4), &resp4)
+	mustUnmarshal(t, out4, &resp4)
 
 	// Verify all 4 tx IDs are sequential and non-zero
 	if tx1 == 0 || resp2.ImmudbTx == 0 || resp3.ImmudbTx == 0 || resp4.ImmudbTx == 0 {
@@ -113,7 +113,7 @@ func TestHistory_ReturnsAllOffersInOrder(t *testing.T) {
 	var r2 struct {
 		ImmudbTx uint64 `json:"immudb_tx"`
 	}
-	json.Unmarshal([]byte(out2), &r2)
+	mustUnmarshal(t, out2, &r2)
 	sshClient(t, ts.addr, signer, `log-offer --negotiation-id neg_hist --round 2 --from founder --type accept --metadata {"cap":8000000} --previous-tx `+itoa(r2.ImmudbTx))
 
 	// Query history
@@ -158,25 +158,25 @@ func TestHistory_ChainIntegrity(t *testing.T) {
 	var r1 struct {
 		ImmudbTx uint64 `json:"immudb_tx"`
 	}
-	json.Unmarshal([]byte(out1), &r1)
+	mustUnmarshal(t, out1, &r1)
 
 	out2, _ := sshClient(t, ts.addr, investorSigner, `log-offer --negotiation-id neg_chain --round 1 --from investor --type counter --metadata {} --previous-tx `+itoa(r1.ImmudbTx))
 	var r2 struct {
 		ImmudbTx uint64 `json:"immudb_tx"`
 	}
-	json.Unmarshal([]byte(out2), &r2)
+	mustUnmarshal(t, out2, &r2)
 
 	out3, _ := sshClient(t, ts.addr, signer, `log-offer --negotiation-id neg_chain --round 2 --from founder --type counter --metadata {} --previous-tx `+itoa(r2.ImmudbTx))
 	var r3 struct {
 		ImmudbTx uint64 `json:"immudb_tx"`
 	}
-	json.Unmarshal([]byte(out3), &r3)
+	mustUnmarshal(t, out3, &r3)
 
 	out4, _ := sshClient(t, ts.addr, investorSigner, `log-offer --negotiation-id neg_chain --round 2 --from investor --type accept --metadata {} --previous-tx `+itoa(r3.ImmudbTx))
 	var r4 struct {
 		ImmudbTx uint64 `json:"immudb_tx"`
 	}
-	json.Unmarshal([]byte(out4), &r4)
+	mustUnmarshal(t, out4, &r4)
 
 	// Query and verify chain
 	histOut, _ := sshClient(t, ts.addr, signer, "history --negotiation-id neg_chain")
@@ -184,7 +184,7 @@ func TestHistory_ChainIntegrity(t *testing.T) {
 		PreviousTx uint64 `json:"previous_tx"`
 		AuditTxID  uint64 `json:"audit_tx_id"`
 	}
-	json.Unmarshal([]byte(histOut), &history)
+	mustUnmarshal(t, histOut, &history)
 
 	if len(history) != 4 {
 		t.Fatalf("expected 4 offers, got %d", len(history))
@@ -215,7 +215,7 @@ func TestLogOffer_NonExistentPreviousTx(t *testing.T) {
 	out, _ := sshClient(t, ts.addr, signer, `log-offer --negotiation-id neg_bad --round 1 --from founder --type offer --metadata {} --previous-tx 99999`)
 
 	var resp struct{ Error string }
-	json.Unmarshal([]byte(out), &resp)
+	mustUnmarshal(t, out, &resp)
 
 	if !strings.Contains(resp.Error, "not found") {
 		t.Errorf("expected 'not found' error for bad previous_tx, got: %s", resp.Error)

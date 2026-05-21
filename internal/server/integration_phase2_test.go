@@ -160,7 +160,7 @@ func TestSignDeniedWrongScope(t *testing.T) {
 	output, _ := sshClientWithStdin(t, ts.addr, signer, signCmd, payload)
 
 	var resp struct{ Error string }
-	json.Unmarshal([]byte(output), &resp)
+	mustUnmarshal(t, output, &resp)
 	if !strings.Contains(resp.Error, "denied") {
 		t.Errorf("expected denial for wrong scope, got: %s", resp.Error)
 	}
@@ -181,7 +181,7 @@ func TestSignDeniedConstraintViolation(t *testing.T) {
 	output, _ := sshClientWithStdin(t, ts.addr, signer, signCmd, payload)
 
 	var resp struct{ Error string }
-	json.Unmarshal([]byte(output), &resp)
+	mustUnmarshal(t, output, &resp)
 	if !strings.Contains(resp.Error, "denied") {
 		t.Errorf("expected denial for constraint violation, got: %s", resp.Error)
 	}
@@ -202,7 +202,7 @@ func TestSignDeniedHardRule(t *testing.T) {
 	output, _ := sshClientWithStdin(t, ts.addr, signer, signCmd, payload)
 
 	var resp struct{ Error string }
-	json.Unmarshal([]byte(output), &resp)
+	mustUnmarshal(t, output, &resp)
 	if !strings.Contains(resp.Error, "hard rule") {
 		t.Errorf("expected hard rule denial, got: %s", resp.Error)
 	}
@@ -236,7 +236,7 @@ func TestSignDeniedExpiredAuth(t *testing.T) {
 	output, _ := sshClientWithStdin(t, ts.addr, signer, signCmd, payload)
 
 	var resp struct{ Error string }
-	json.Unmarshal([]byte(output), &resp)
+	mustUnmarshal(t, output, &resp)
 	if !strings.Contains(resp.Error, "denied") {
 		t.Errorf("expected denial for expired auth, got: %s", resp.Error)
 	}
@@ -257,7 +257,7 @@ func TestSignDeniedRevokedKey(t *testing.T) {
 	output, _ := sshClientWithStdin(t, ts.addr, signer, signCmd, payload)
 
 	var resp struct{ Error string }
-	json.Unmarshal([]byte(output), &resp)
+	mustUnmarshal(t, output, &resp)
 	if resp.Error == "" {
 		t.Error("expected error for revoked key")
 	}
@@ -318,7 +318,7 @@ func TestRevokeCommand(t *testing.T) {
 	payload := []byte("test data")
 	signOutput, _ := sshClientWithStdin(t, ts.addr, signer, "sign --type git-commit --key-id "+keyID, payload)
 	var signResp struct{ Error string }
-	json.Unmarshal([]byte(signOutput), &signResp)
+	mustUnmarshal(t, signOutput, &signResp)
 	if signResp.Error == "" {
 		t.Error("expected error when signing with revoked key")
 	}
@@ -334,7 +334,7 @@ func TestSignEmptyPayload(t *testing.T) {
 	output, _ := sshClientWithStdin(t, ts.addr, signer, "sign --type git-commit --key-id "+keyID, nil)
 
 	var resp struct{ Error string }
-	json.Unmarshal([]byte(output), &resp)
+	mustUnmarshal(t, output, &resp)
 	if resp.Error == "" {
 		t.Error("expected error for empty payload")
 	}
@@ -350,7 +350,7 @@ func TestSignNoSigningKeys(t *testing.T) {
 	output, _ := sshClientWithStdin(t, ts.addr, signer, "sign --type git-commit", payload)
 
 	var resp struct{ Error string }
-	json.Unmarshal([]byte(output), &resp)
+	mustUnmarshal(t, output, &resp)
 	if !strings.Contains(resp.Error, "no active signing keys") {
 		t.Errorf("expected 'no active signing keys' error, got: %s", resp.Error)
 	}
