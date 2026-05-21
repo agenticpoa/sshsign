@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -196,7 +197,7 @@ func (m Model) viewWelcome() string {
 			b.WriteString("\n")
 		}
 		if !m.isNewUser && m.db != nil {
-			keys, _ := storage.ListSigningKeys(m.db, m.user.UserID)
+			keys, _ := storage.ListSigningKeys(context.Background(), m.db, m.user.UserID)
 			active, revoked := 0, 0
 			for _, k := range keys {
 				if k.RevokedAt != nil {
@@ -209,7 +210,7 @@ func (m Model) viewWelcome() string {
 			b.WriteString(s.Info.Render(fmt.Sprintf("%d active, %d revoked", active, revoked)))
 			b.WriteString("\n")
 
-			pending, _ := storage.ListPendingSignatures(m.db, m.user.UserID)
+			pending, _ := storage.ListPendingSignatures(context.Background(), m.db, m.user.UserID)
 			if len(pending) > 0 {
 				b.WriteString(s.InfoLabel.Render("  Pending "))
 				b.WriteString(s.Selected.Render(fmt.Sprintf("%d awaiting approval", len(pending))))

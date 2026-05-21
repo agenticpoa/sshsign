@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -97,7 +98,7 @@ func (m Model) handleLinkKey() (tea.Model, tea.Cmd) {
 
 	fingerprint := gossh.FingerprintSHA256(pubKey)
 
-	_, err = storage.LinkKey(m.db, m.user.UserID, fingerprint, pubKeyStr, label)
+	_, err = storage.LinkKey(context.Background(), m.db, m.user.UserID, fingerprint, pubKeyStr, label)
 	if err != nil {
 		m.linkKey.err = fmt.Sprintf("Failed to link key: %v", err)
 		return m, nil

@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
@@ -148,7 +149,7 @@ func TestSSHConnectionCreatesUser(t *testing.T) {
 	}
 	fingerprint := gossh.FingerprintSHA256(sshPub)
 
-	user, key, err := storage.FindUserByFingerprint(ts.db.DB, fingerprint)
+	user, key, err := storage.FindUserByFingerprint(context.Background(), ts.db.DB, fingerprint)
 	if err != nil {
 		t.Fatalf("finding user: %v", err)
 	}
@@ -181,7 +182,7 @@ func TestSecondConnectionSameUser(t *testing.T) {
 	sshPub, _ := gossh.NewPublicKey(pub)
 	fingerprint := gossh.FingerprintSHA256(sshPub)
 
-	user, _, err := storage.FindUserByFingerprint(ts.db.DB, fingerprint)
+	user, _, err := storage.FindUserByFingerprint(context.Background(), ts.db.DB, fingerprint)
 	if err != nil {
 		t.Fatalf("finding user: %v", err)
 	}
@@ -190,7 +191,7 @@ func TestSecondConnectionSameUser(t *testing.T) {
 	}
 
 	// Should still only have one user key
-	keys, err := storage.ListUserKeys(ts.db.DB, user.UserID)
+	keys, err := storage.ListUserKeys(context.Background(), ts.db.DB, user.UserID)
 	if err != nil {
 		t.Fatalf("listing keys: %v", err)
 	}

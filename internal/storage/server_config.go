@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"fmt"
@@ -17,9 +18,9 @@ const kekSaltBytes = 32
 //
 // The salt is stored next to the wrapped DEKs in the same database;
 // backup/restore must move them together or every signing key is lost.
-func GetOrCreateKEKSalt(db *sql.DB) ([]byte, error) {
+func GetOrCreateKEKSalt(ctx context.Context, db *sql.DB) ([]byte, error) {
 	var salt []byte
-	err := db.QueryRow(`SELECT kek_salt FROM server_config WHERE id = 1`).Scan(&salt)
+	err := db.QueryRowContext(ctx, `SELECT kek_salt FROM server_config WHERE id = 1`).Scan(&salt)
 	if err == nil {
 		if len(salt) < 16 {
 			return nil, fmt.Errorf("stored KEK salt is too short (%d bytes)", len(salt))
@@ -34,7 +35,7 @@ func GetOrCreateKEKSalt(db *sql.DB) ([]byte, error) {
 	if _, err := rand.Read(fresh); err != nil {
 		return nil, fmt.Errorf("generating kek salt: %w", err)
 	}
-	if _, err := db.Exec(`INSERT INTO server_config (id, kek_salt) VALUES (1, ?)`, fresh); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO server_config (id, kek_salt) VALUES (1, ?)`, fresh); err != nil {
 		return nil, fmt.Errorf("persisting kek salt: %w", err)
 	}
 	return fresh, nil

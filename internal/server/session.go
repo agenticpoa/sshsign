@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -30,8 +31,8 @@ type SessionContext struct {
 }
 
 // EnsureUser finds or creates a user for the connecting SSH key.
-func EnsureUser(db *sql.DB, fingerprint, publicKey string) (*storage.User, *storage.UserKey, bool, error) {
-	user, key, err := storage.FindUserByFingerprint(db, fingerprint)
+func EnsureUser(ctx context.Context, db *sql.DB, fingerprint, publicKey string) (*storage.User, *storage.UserKey, bool, error) {
+	user, key, err := storage.FindUserByFingerprint(ctx, db, fingerprint)
 	if err != nil {
 		return nil, nil, false, err
 	}
@@ -40,7 +41,7 @@ func EnsureUser(db *sql.DB, fingerprint, publicKey string) (*storage.User, *stor
 		return user, key, false, nil
 	}
 
-	user, key, err = storage.CreateUser(db, fingerprint, publicKey)
+	user, key, err = storage.CreateUser(ctx, db, fingerprint, publicKey)
 	if err != nil {
 		return nil, nil, false, err
 	}
@@ -139,7 +140,7 @@ func SessionHandler(db *sql.DB, kek *apoacrypto.KEKRing, rl *ServerRateLimits, a
 				return
 			}
 
-			user, userKey, isNew, err := EnsureUser(db, fingerprint, publicKey)
+			user, userKey, isNew, err := EnsureUser(sess.Context(), db, fingerprint, publicKey)
 			if err != nil {
 				log.Printf("error ensuring user for %s: %v", fingerprint, err)
 				wish.Fatalln(sess, "internal error")

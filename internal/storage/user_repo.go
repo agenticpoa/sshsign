@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -8,8 +9,8 @@ import (
 
 // FindUserByFingerprint looks up a user by their SSH key fingerprint.
 // Returns nil, nil, nil if no matching key is found.
-func FindUserByFingerprint(db *sql.DB, fingerprint string) (*User, *UserKey, error) {
-	row := db.QueryRow(`
+func FindUserByFingerprint(ctx context.Context, db *sql.DB, fingerprint string) (*User, *UserKey, error) {
+	row := db.QueryRowContext(ctx, `
 		SELECT u.user_id, u.created_at, u.status,
 		       uk.ssh_fingerprint, uk.user_id, uk.public_key, uk.label, uk.added_at, uk.revoked_at
 		FROM user_keys uk
@@ -44,20 +45,20 @@ func FindUserByFingerprint(db *sql.DB, fingerprint string) (*User, *UserKey, err
 }
 
 // CreateUser creates a new user and links the given SSH key to them.
-func CreateUser(db *sql.DB, fingerprint, publicKey string) (*User, *UserKey, error) {
+func CreateUser(ctx context.Context, db *sql.DB, fingerprint, publicKey string) (*User, *UserKey, error) {
 	userID := NewUserID()
 
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("starting transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`INSERT INTO users (user_id) VALUES (?)`, userID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users (user_id) VALUES (?)`, userID); err != nil {
 		return nil, nil, fmt.Errorf("inserting user: %w", err)
 	}
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO user_keys (ssh_fingerprint, user_id, public_key) VALUES (?, ?, ?)`,
 		fingerprint, userID, publicKey,
 	); err != nil {
@@ -68,12 +69,12 @@ func CreateUser(db *sql.DB, fingerprint, publicKey string) (*User, *UserKey, err
 		return nil, nil, fmt.Errorf("committing transaction: %w", err)
 	}
 
-	return FindUserByFingerprint(db, fingerprint)
+	return FindUserByFingerprint(ctx, db, fingerprint)
 }
 
 // LinkKey adds a new SSH key to an existing user.
-func LinkKey(db *sql.DB, userID, fingerprint, publicKey, label string) (*UserKey, error) {
-	_, err := db.Exec(
+func LinkKey(ctx context.Context, db *sql.DB, userID, fingerprint, publicKey, label string) (*UserKey, error) {
+	_, err := db.ExecContext(ctx,
 		`INSERT INTO user_keys (ssh_fingerprint, user_id, public_key, label) VALUES (?, ?, ?, ?)`,
 		fingerprint, userID, publicKey, label,
 	)
@@ -91,8 +92,8 @@ func LinkKey(db *sql.DB, userID, fingerprint, publicKey, label string) (*UserKey
 }
 
 // ListUserKeys returns all SSH keys linked to a user.
-func ListUserKeys(db *sql.DB, userID string) ([]UserKey, error) {
-	rows, err := db.Query(
+func ListUserKeys(ctx context.Context, db *sql.DB, userID string) ([]UserKey, error) {
+	rows, err := db.QueryContext(ctx,
 		`SELECT ssh_fingerprint, user_id, public_key, label, added_at, revoked_at
 		 FROM user_keys WHERE user_id = ? ORDER BY added_at`,
 		userID,

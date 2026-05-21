@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"context"
 	"bytes"
 	"encoding/json"
 	"strings"
@@ -59,7 +60,7 @@ func setupUserWithSigningKeyAndAuth(t *testing.T, ts *testServer, scopes []strin
 	sshPub, _ := gossh.NewPublicKey(pub)
 	fingerprint := gossh.FingerprintSHA256(sshPub)
 
-	user, _, err := storage.FindUserByFingerprint(ts.db.DB, fingerprint)
+	user, _, err := storage.FindUserByFingerprint(context.Background(), ts.db.DB, fingerprint)
 	if err != nil || user == nil {
 		t.Fatalf("finding user: %v", err)
 	}
@@ -90,13 +91,13 @@ func setupUserWithSigningKeyAndAuth(t *testing.T, ts *testServer, scopes []strin
 		t.Fatalf("wrapping DEK: %v", err)
 	}
 
-	sk, err := storage.CreateSigningKey(ts.db.DB, user.UserID, pubSSH, encPrivKey, wrappedDEK, kekAlgo)
+	sk, err := storage.CreateSigningKey(context.Background(), ts.db.DB, user.UserID, pubSSH, encPrivKey, wrappedDEK, kekAlgo)
 	if err != nil {
 		t.Fatalf("creating signing key: %v", err)
 	}
 
 	// Create authorization
-	_, err = storage.CreateAuthorization(ts.db.DB, sk.KeyID, user.UserID,
+	_, err = storage.CreateAuthorization(context.Background(), ts.db.DB, sk.KeyID, user.UserID,
 		scopes, constraints, hardRules, softRules, nil)
 	if err != nil {
 		t.Fatalf("creating authorization: %v", err)
@@ -215,7 +216,7 @@ func TestSignDeniedExpiredAuth(t *testing.T) {
 
 	sshPub, _ := gossh.NewPublicKey(pub)
 	fingerprint := gossh.FingerprintSHA256(sshPub)
-	user, _, _ := storage.FindUserByFingerprint(ts.db.DB, fingerprint)
+	user, _, _ := storage.FindUserByFingerprint(context.Background(), ts.db.DB, fingerprint)
 
 	edPub, edPriv, _ := apoacrypto.GenerateEd25519Keypair()
 	pubSSH, _ := apoacrypto.MarshalPublicKeySSH(edPub)
@@ -223,11 +224,11 @@ func TestSignDeniedExpiredAuth(t *testing.T) {
 	encPrivKey, _ := apoacrypto.EncryptPrivateKey(edPriv, dek)
 	wrappedDEK, kekAlgo, _ := ts.kek.WrapDEK(dek)
 
-	sk, _ := storage.CreateSigningKey(ts.db.DB, user.UserID, pubSSH, encPrivKey, wrappedDEK, kekAlgo)
+	sk, _ := storage.CreateSigningKey(context.Background(), ts.db.DB, user.UserID, pubSSH, encPrivKey, wrappedDEK, kekAlgo)
 
 	// Create expired authorization
 	expired := time.Now().Add(-1 * time.Hour)
-	storage.CreateAuthorization(ts.db.DB, sk.KeyID, user.UserID,
+	storage.CreateAuthorization(context.Background(), ts.db.DB, sk.KeyID, user.UserID,
 		[]string{"git-commit"}, nil, nil, nil, &expired)
 
 	payload := []byte("test data")
@@ -249,7 +250,7 @@ func TestSignDeniedRevokedKey(t *testing.T) {
 	)
 
 	// Revoke the key
-	storage.RevokeSigningKey(ts.db.DB, keyID)
+	storage.RevokeSigningKey(context.Background(), ts.db.DB, keyID)
 
 	payload := []byte("test data")
 	signCmd := "sign --type git-commit --key-id " + keyID

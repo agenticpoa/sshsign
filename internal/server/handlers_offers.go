@@ -65,7 +65,7 @@ func handleLogOffer(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 
 	// Turn validation: parties must alternate
-	lastOffer, err := storage.GetLastOffer(sc.DB, negotiationID)
+	lastOffer, err := storage.GetLastOffer(sess.Context(), sc.DB, negotiationID)
 	if err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("checking turn order: %v", err)})
 		return
@@ -77,7 +77,7 @@ func handleLogOffer(sess ssh.Session, sc *SessionContext, args []string) {
 
 	// If previous_tx > 0, verify it exists
 	if previousTx > 0 {
-		prev, err := storage.FindOfferByAuditTx(sc.DB, previousTx)
+		prev, err := storage.FindOfferByAuditTx(sess.Context(), sc.DB, previousTx)
 		if err != nil {
 			writeJSON(sess, errorResponse{Error: fmt.Sprintf("checking previous tx: %v", err)})
 			return
@@ -97,6 +97,7 @@ func handleLogOffer(sess ssh.Session, sc *SessionContext, args []string) {
 
 	// Store the offer
 	offer, err := storage.CreateNegotiationOffer(
+		sess.Context(),
 		sc.DB, negotiationID, round, fromParty, offerType,
 		metadata, previousTx, auditTxID, sc.User.UserID,
 	)
@@ -134,7 +135,7 @@ func handleHistory(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	offers, err := storage.ListNegotiationOffers(sc.DB, negotiationID)
+	offers, err := storage.ListNegotiationOffers(sess.Context(), sc.DB, negotiationID)
 	if err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("listing offers: %v", err)})
 		return

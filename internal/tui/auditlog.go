@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -30,7 +31,7 @@ type auditDisplayEntry struct {
 func newAuditLogModel(db *sql.DB, user *storage.User) auditLogModel {
 	var entries []auditDisplayEntry
 
-	keys, _ := storage.ListSigningKeys(db, user.UserID)
+	keys, _ := storage.ListSigningKeys(context.Background(), db, user.UserID)
 	for _, k := range keys {
 		entries = append(entries, auditDisplayEntry{
 			KeyID:     k.KeyID,
@@ -46,7 +47,7 @@ func newAuditLogModel(db *sql.DB, user *storage.User) auditLogModel {
 			})
 		}
 
-		auths, _ := storage.FindAuthorizationsForKey(db, k.KeyID)
+		auths, _ := storage.FindAuthorizationsForKey(context.Background(), db, k.KeyID)
 		for _, a := range auths {
 			entries = append(entries, auditDisplayEntry{
 				KeyID:     k.KeyID,

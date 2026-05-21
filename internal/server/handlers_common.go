@@ -19,7 +19,7 @@ import (
 // immediately. ownerCheck="" skips ownership — used by approval flows
 // that load a key from a pending row without owning the key.
 func requireSigningKey(sess ssh.Session, sc *SessionContext, keyID, ownerCheck string) (*storage.SigningKey, bool) {
-	sk, err := storage.GetSigningKey(sc.DB, keyID)
+	sk, err := storage.GetSigningKey(sess.Context(), sc.DB, keyID)
 	if err != nil || sk == nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("signing key %s not found", keyID)})
 		return nil, false

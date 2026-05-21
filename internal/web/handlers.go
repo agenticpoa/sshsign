@@ -53,7 +53,7 @@ func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ps, err := storage.GetPendingSignature(s.db, pendingID)
+	ps, err := storage.GetPendingSignature(r.Context(), s.db, pendingID)
 	if err != nil || ps == nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -82,14 +82,14 @@ func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check authorization is still valid
-	auth, _ := storage.GetAuthorization(s.db, ps.AuthTokenID)
+	auth, _ := storage.GetAuthorization(r.Context(), s.db, ps.AuthTokenID)
 	if auth == nil || auth.RevokedAt != nil || (auth.ExpiresAt != nil && time.Now().After(*auth.ExpiresAt)) {
 		http.Error(w, "authorization expired or revoked", http.StatusGone)
 		return
 	}
 
 	// Check key is still valid
-	sk, _ := storage.GetSigningKey(s.db, ps.SigningKeyID)
+	sk, _ := storage.GetSigningKey(r.Context(), s.db, ps.SigningKeyID)
 	if sk == nil || sk.RevokedAt != nil {
 		http.Error(w, "signing key revoked", http.StatusGone)
 		return
@@ -110,7 +110,7 @@ func (s *Server) handlePostApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ps, err := storage.GetPendingSignature(s.db, pendingID)
+	ps, err := storage.GetPendingSignature(r.Context(), s.db, pendingID)
 	if err != nil || ps == nil {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		return
@@ -138,13 +138,13 @@ func (s *Server) handlePostApproval(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Re-validate authorization and key
-	auth, _ := storage.GetAuthorization(s.db, ps.AuthTokenID)
+	auth, _ := storage.GetAuthorization(r.Context(), s.db, ps.AuthTokenID)
 	if auth == nil || auth.RevokedAt != nil || (auth.ExpiresAt != nil && time.Now().After(*auth.ExpiresAt)) {
 		http.Error(w, `{"error":"authorization expired or revoked"}`, http.StatusGone)
 		return
 	}
 
-	sk, _ := storage.GetSigningKey(s.db, ps.SigningKeyID)
+	sk, _ := storage.GetSigningKey(r.Context(), s.db, ps.SigningKeyID)
 	if sk == nil || sk.RevokedAt != nil {
 		http.Error(w, `{"error":"signing key revoked"}`, http.StatusGone)
 		return
@@ -210,7 +210,7 @@ func (s *Server) handlePostApproval(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Store the sealed envelope
-	if err := storage.SaveEvidenceEnvelope(s.db, ps.ID, sealed.Data, sealed.Hash); err != nil {
+	if err := storage.SaveEvidenceEnvelope(r.Context(), s.db, ps.ID, sealed.Data, sealed.Hash); err != nil {
 		log.Printf("error saving envelope for %s: %v", pendingID, err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
@@ -243,13 +243,13 @@ func (s *Server) handlePostApproval(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Mark as approved and persist signature
-	if err := storage.ResolvePendingSignature(s.db, ps.ID, "approved", auth.GrantedBy, string(sig)); err != nil {
+	if err := storage.ResolvePendingSignature(r.Context(), s.db, ps.ID, "approved", auth.GrantedBy, string(sig)); err != nil {
 		log.Printf("error resolving %s: %v", pendingID, err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
 
-	storage.RecordKeyUsage(s.db, sk.KeyID)
+	storage.RecordKeyUsage(r.Context(), s.db, sk.KeyID)
 
 	log.Printf("WEB_APPROVED pending %s by %s, key %s, envelope %s", pendingID, auth.GrantedBy, sk.KeyID, sealed.Hash[:16])
 

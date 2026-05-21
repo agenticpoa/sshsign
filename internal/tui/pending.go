@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -41,7 +42,7 @@ func newPendingApprovalsModel(db *sql.DB, user *storage.User) pendingApprovalsMo
 }
 
 func (p *pendingApprovalsModel) refresh() {
-	pendings, _ := storage.ListPendingSignatures(p.db, p.user.UserID)
+	pendings, _ := storage.ListPendingSignatures(context.Background(), p.db, p.user.UserID)
 	p.pendings = pendings
 	if p.cursor >= len(pendings) && len(pendings) > 0 {
 		p.cursor = len(pendings) - 1
@@ -116,7 +117,7 @@ func (m Model) updatePendingDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "a":
 		ps := m.pending.pendings[m.pending.cursor]
-		auth, _ := storage.GetAuthorization(m.db, ps.AuthTokenID)
+		auth, _ := storage.GetAuthorization(context.Background(), m.db, ps.AuthTokenID)
 		if auth != nil && auth.RequireSignature {
 			m.pending.status = "This approval requires a handwritten signature. Open the URL above in your browser."
 			m.pending.isError = true
@@ -137,7 +138,7 @@ func (m Model) executeApprovalAction() (tea.Model, tea.Cmd) {
 	m.pending.confirmAction = ""
 
 	if action == "deny" {
-		if err := storage.ResolvePendingSignature(m.db, ps.ID, "denied", m.user.UserID, ""); err != nil {
+		if err := storage.ResolvePendingSignature(context.Background(), m.db, ps.ID, "denied", m.user.UserID, ""); err != nil {
 			m.pending.status = fmt.Sprintf("Error: %v", err)
 			m.pending.isError = true
 			return m, nil
@@ -161,7 +162,7 @@ func (m Model) executeApprovalAction() (tea.Model, tea.Cmd) {
 	}
 
 	// Approve: re-validate and sign
-	auth, err := storage.GetAuthorization(m.db, ps.AuthTokenID)
+	auth, err := storage.GetAuthorization(context.Background(), m.db, ps.AuthTokenID)
 	if err != nil || auth == nil {
 		m.pending.status = "Authorization not found"
 		m.pending.isError = true
@@ -178,7 +179,7 @@ func (m Model) executeApprovalAction() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	sk, err := storage.GetSigningKey(m.db, ps.SigningKeyID)
+	sk, err := storage.GetSigningKey(context.Background(), m.db, ps.SigningKeyID)
 	if err != nil || sk == nil {
 		m.pending.status = "Signing key not found"
 		m.pending.isError = true
@@ -219,7 +220,7 @@ func (m Model) executeApprovalAction() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if err := storage.ResolvePendingSignature(m.db, ps.ID, "approved", m.user.UserID, string(sig)); err != nil {
+	if err := storage.ResolvePendingSignature(context.Background(), m.db, ps.ID, "approved", m.user.UserID, string(sig)); err != nil {
 		m.pending.status = fmt.Sprintf("Error: %v", err)
 		m.pending.isError = true
 		return m, nil
@@ -236,7 +237,7 @@ func (m Model) executeApprovalAction() (tea.Model, tea.Cmd) {
 			Signature:          string(sig),
 		})
 	}
-	storage.RecordKeyUsage(m.db, sk.KeyID)
+	storage.RecordKeyUsage(context.Background(), m.db, sk.KeyID)
 
 	m.pending.status = fmt.Sprintf("Approved %s", ps.ID)
 	m.pending.isError = false
@@ -280,7 +281,7 @@ func (m Model) viewPendingList() string {
 			b.WriteString("\n")
 
 			if i == m.pending.cursor {
-				auth, _ := storage.GetAuthorization(m.db, ps.AuthTokenID)
+				auth, _ := storage.GetAuthorization(context.Background(), m.db, ps.AuthTokenID)
 				if auth != nil && auth.RequireSignature {
 					b.WriteString(m.s.Dim.Render("      requires handwritten signature (browser)"))
 					b.WriteString("\n")
@@ -312,7 +313,7 @@ func (m Model) viewPendingList() string {
 func (m Model) viewPendingDetail() string {
 	var b strings.Builder
 	ps := m.pending.pendings[m.pending.cursor]
-	auth, _ := storage.GetAuthorization(m.db, ps.AuthTokenID)
+	auth, _ := storage.GetAuthorization(context.Background(), m.db, ps.AuthTokenID)
 
 	b.WriteString(m.s.Title.Render(formatScope(ps.DocType)))
 	b.WriteString("\n\n")

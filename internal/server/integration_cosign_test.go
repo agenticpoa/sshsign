@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -20,7 +21,7 @@ func setupUserWithCosignAuth(t *testing.T, ts *testServer, scopes []string, meta
 
 	sshPub, _ := gossh.NewPublicKey(pub)
 	fingerprint := gossh.FingerprintSHA256(sshPub)
-	user, _, err := storage.FindUserByFingerprint(ts.db.DB, fingerprint)
+	user, _, err := storage.FindUserByFingerprint(context.Background(), ts.db.DB, fingerprint)
 	if err != nil || user == nil {
 		t.Fatalf("finding user: %v", err)
 	}
@@ -31,12 +32,12 @@ func setupUserWithCosignAuth(t *testing.T, ts *testServer, scopes []string, meta
 	encPrivKey, _ := apoacrypto.EncryptPrivateKey(edPriv, dek)
 	wrappedDEK, kekAlgo, _ := ts.kek.WrapDEK(dek)
 
-	sk, err := storage.CreateSigningKey(ts.db.DB, user.UserID, pubSSH, encPrivKey, wrappedDEK, kekAlgo)
+	sk, err := storage.CreateSigningKey(context.Background(), ts.db.DB, user.UserID, pubSSH, encPrivKey, wrappedDEK, kekAlgo)
 	if err != nil {
 		t.Fatalf("creating signing key: %v", err)
 	}
 
-	_, err = storage.CreateAuthorizationFull(ts.db.DB, sk.KeyID, user.UserID,
+	_, err = storage.CreateAuthorizationFull(context.Background(), ts.db.DB, sk.KeyID, user.UserID,
 		scopes, nil, metadataConstraints, "cosign", false, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("creating cosign authorization: %v", err)
@@ -269,7 +270,7 @@ func TestCosignFlow_ApproveAfterKeyRevoke(t *testing.T) {
 	json.Unmarshal([]byte(signOutput), &pendingResp)
 
 	// Revoke the signing key
-	storage.RevokeSigningKey(ts.db.DB, keyID)
+	storage.RevokeSigningKey(context.Background(), ts.db.DB, keyID)
 
 	// Try to approve - should fail (key was revoked)
 	approveOutput, _ := sshClient(t, ts.addr, signer, "approve --id "+pendingResp.PendingID+" --confirm")

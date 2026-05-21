@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -9,11 +10,11 @@ import (
 
 func setupUserAndKey(t *testing.T, tdb *storage.TestDB) (*storage.User, *storage.SigningKey) {
 	t.Helper()
-	user, _, err := storage.CreateUser(tdb.DB, "SHA256:authtest", "ssh-ed25519 AAAAauthtest")
+	user, _, err := storage.CreateUser(context.Background(), tdb.DB, "SHA256:authtest", "ssh-ed25519 AAAAauthtest")
 	if err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
-	sk, err := storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAAsig", []byte("enc"), []byte("dek"), "")
+	sk, err := storage.CreateSigningKey(context.Background(), tdb.DB, user.UserID, "ssh-ed25519 AAAAsig", []byte("enc"), []byte("dek"), "")
 	if err != nil {
 		t.Fatalf("creating signing key: %v", err)
 	}
@@ -26,6 +27,7 @@ func TestCreateAndGetAuthorization(t *testing.T) {
 
 	expires := time.Now().Add(30 * 24 * time.Hour)
 	auth, err := storage.CreateAuthorization(
+		context.Background(),
 		tdb.DB, sk.KeyID, user.UserID,
 		[]string{"git-commit"},
 		map[string][]string{"repo": {"github.com/user/*"}},
@@ -57,7 +59,7 @@ func TestCreateAndGetAuthorization(t *testing.T) {
 	}
 
 	// Get by ID
-	found, err := storage.GetAuthorization(tdb.DB, auth.TokenID)
+	found, err := storage.GetAuthorization(context.Background(), tdb.DB, auth.TokenID)
 	if err != nil {
 		t.Fatalf("getting authorization: %v", err)
 	}
@@ -70,19 +72,19 @@ func TestFindAuthorizationsForKey(t *testing.T) {
 	tdb := testDB(t)
 	user, sk := setupUserAndKey(t, tdb)
 
-	_, err := storage.CreateAuthorization(tdb.DB, sk.KeyID, user.UserID,
+	_, err := storage.CreateAuthorization(context.Background(), tdb.DB, sk.KeyID, user.UserID,
 		[]string{"git-commit"}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("creating first auth: %v", err)
 	}
 
-	_, err = storage.CreateAuthorization(tdb.DB, sk.KeyID, user.UserID,
+	_, err = storage.CreateAuthorization(context.Background(), tdb.DB, sk.KeyID, user.UserID,
 		[]string{"api-request"}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("creating second auth: %v", err)
 	}
 
-	auths, err := storage.FindAuthorizationsForKey(tdb.DB, sk.KeyID)
+	auths, err := storage.FindAuthorizationsForKey(context.Background(), tdb.DB, sk.KeyID)
 	if err != nil {
 		t.Fatalf("finding authorizations: %v", err)
 	}
@@ -96,7 +98,7 @@ func TestFindAuthorizationsForKey_ExcludesExpired(t *testing.T) {
 	user, sk := setupUserAndKey(t, tdb)
 
 	// Active (no expiry)
-	_, err := storage.CreateAuthorization(tdb.DB, sk.KeyID, user.UserID,
+	_, err := storage.CreateAuthorization(context.Background(), tdb.DB, sk.KeyID, user.UserID,
 		[]string{"alpha"}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("creating active auth: %v", err)
@@ -104,7 +106,7 @@ func TestFindAuthorizationsForKey_ExcludesExpired(t *testing.T) {
 
 	// Active (future expiry)
 	future := time.Now().Add(24 * time.Hour)
-	_, err = storage.CreateAuthorization(tdb.DB, sk.KeyID, user.UserID,
+	_, err = storage.CreateAuthorization(context.Background(), tdb.DB, sk.KeyID, user.UserID,
 		[]string{"beta"}, nil, nil, nil, &future)
 	if err != nil {
 		t.Fatalf("creating future-expiry auth: %v", err)
@@ -112,13 +114,13 @@ func TestFindAuthorizationsForKey_ExcludesExpired(t *testing.T) {
 
 	// Expired
 	past := time.Now().Add(-1 * time.Hour)
-	_, err = storage.CreateAuthorization(tdb.DB, sk.KeyID, user.UserID,
+	_, err = storage.CreateAuthorization(context.Background(), tdb.DB, sk.KeyID, user.UserID,
 		[]string{"gamma"}, nil, nil, nil, &past)
 	if err != nil {
 		t.Fatalf("creating expired auth: %v", err)
 	}
 
-	auths, err := storage.FindAuthorizationsForKey(tdb.DB, sk.KeyID)
+	auths, err := storage.FindAuthorizationsForKey(context.Background(), tdb.DB, sk.KeyID)
 	if err != nil {
 		t.Fatalf("finding authorizations: %v", err)
 	}
@@ -138,18 +140,18 @@ func TestRevokeAuthorization(t *testing.T) {
 	tdb := testDB(t)
 	user, sk := setupUserAndKey(t, tdb)
 
-	auth, err := storage.CreateAuthorization(tdb.DB, sk.KeyID, user.UserID,
+	auth, err := storage.CreateAuthorization(context.Background(), tdb.DB, sk.KeyID, user.UserID,
 		[]string{"git-commit"}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("creating auth: %v", err)
 	}
 
-	if err := storage.RevokeAuthorization(tdb.DB, auth.TokenID); err != nil {
+	if err := storage.RevokeAuthorization(context.Background(), tdb.DB, auth.TokenID); err != nil {
 		t.Fatalf("revoking: %v", err)
 	}
 
 	// Should not appear in active authorizations
-	auths, err := storage.FindAuthorizationsForKey(tdb.DB, sk.KeyID)
+	auths, err := storage.FindAuthorizationsForKey(context.Background(), tdb.DB, sk.KeyID)
 	if err != nil {
 		t.Fatalf("finding authorizations: %v", err)
 	}
@@ -158,7 +160,7 @@ func TestRevokeAuthorization(t *testing.T) {
 	}
 
 	// But should still be gettable by ID (with revoked_at set)
-	found, err := storage.GetAuthorization(tdb.DB, auth.TokenID)
+	found, err := storage.GetAuthorization(context.Background(), tdb.DB, auth.TokenID)
 	if err != nil {
 		t.Fatalf("getting revoked auth: %v", err)
 	}

@@ -25,7 +25,7 @@ func handleGetEnvelope(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	ps, err := storage.GetPendingSignature(sc.DB, pendingID)
+	ps, err := storage.GetPendingSignature(sess.Context(), sc.DB, pendingID)
 	if err != nil || ps == nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("pending signature %s not found", pendingID)})
 		return
@@ -37,7 +37,7 @@ func handleGetEnvelope(sess ssh.Session, sc *SessionContext, args []string) {
 	// ceremony, either party can fetch the other's envelope to reconstruct
 	// the fully-signed artifact locally. Without this, a two-party SAFE
 	// signature only produces an executed PDF for the creator side.
-	authToken, _ := storage.GetAuthorization(sc.DB, ps.AuthTokenID)
+	authToken, _ := storage.GetAuthorization(sess.Context(), sc.DB, ps.AuthTokenID)
 	ownsDirectly := authToken != nil &&
 		(authToken.GrantedBy == sc.User.UserID || ps.RequesterID == sc.User.UserID)
 	if !ownsDirectly {
@@ -67,7 +67,7 @@ func handleGetEnvelope(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 
 	// Get the evidence envelope if it exists
-	env, _ := storage.GetEvidenceEnvelope(sc.DB, pendingID)
+	env, _ := storage.GetEvidenceEnvelope(sess.Context(), sc.DB, pendingID)
 	if env != nil {
 		var envelopeJSON any
 		json.Unmarshal(env.Data, &envelopeJSON)
@@ -94,7 +94,7 @@ func handleSession(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	pendings, err := storage.ListSessionPendings(sc.DB, sessionID)
+	pendings, err := storage.ListSessionPendings(sess.Context(), sc.DB, sessionID)
 	if err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("querying session: %v", err)})
 		return
@@ -160,7 +160,7 @@ func handleDeny(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	ps, err := storage.GetPendingSignature(sc.DB, pendingID)
+	ps, err := storage.GetPendingSignature(sess.Context(), sc.DB, pendingID)
 	if err != nil || ps == nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("pending signature %s not found", pendingID)})
 		return
@@ -172,7 +172,7 @@ func handleDeny(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 
 	// Only the principal can deny
-	authToken, err := storage.GetAuthorization(sc.DB, ps.AuthTokenID)
+	authToken, err := storage.GetAuthorization(sess.Context(), sc.DB, ps.AuthTokenID)
 	if err != nil || authToken == nil {
 		writeJSON(sess, errorResponse{Error: "authorization not found"})
 		return
@@ -182,7 +182,7 @@ func handleDeny(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	if err := storage.ResolvePendingSignature(sc.DB, pendingID, "denied", sc.User.UserID, ""); err != nil {
+	if err := storage.ResolvePendingSignature(sess.Context(), sc.DB, pendingID, "denied", sc.User.UserID, ""); err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("resolving pending signature: %v", err)})
 		return
 	}

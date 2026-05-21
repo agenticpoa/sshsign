@@ -29,11 +29,11 @@ func main() {
 	}
 	defer db.Close()
 
-	if err := storage.Migrate(db); err != nil {
+	if err := storage.Migrate(context.Background(), db); err != nil {
 		log.Fatalf("running migrations: %v", err)
 	}
 
-	salt, err := storage.GetOrCreateKEKSalt(db)
+	salt, err := storage.GetOrCreateKEKSalt(context.Background(), db)
 	if err != nil {
 		log.Fatalf("loading KEK salt: %v", err)
 	}

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"sort"
@@ -33,7 +34,7 @@ type manageKeysModel struct {
 }
 
 func newManageKeysModel(db *sql.DB, user *storage.User) manageKeysModel {
-	keys, _ := storage.ListSigningKeys(db, user.UserID)
+	keys, _ := storage.ListSigningKeys(context.Background(), db, user.UserID)
 	sortKeysActiveFirst(keys)
 	return manageKeysModel{
 		keys: keys,
@@ -44,7 +45,7 @@ func newManageKeysModel(db *sql.DB, user *storage.User) manageKeysModel {
 }
 
 func (mk *manageKeysModel) refreshKeys() {
-	mk.keys, _ = storage.ListSigningKeys(mk.db, mk.user.UserID)
+	mk.keys, _ = storage.ListSigningKeys(context.Background(), mk.db, mk.user.UserID)
 	sortKeysActiveFirst(mk.keys)
 }
 
@@ -63,7 +64,7 @@ func sortKeysActiveFirst(keys []storage.SigningKey) {
 
 func (mk *manageKeysModel) refreshAuths() {
 	if mk.cursor < len(mk.keys) {
-		mk.auths, _ = storage.FindAuthorizationsForKey(mk.db, mk.keys[mk.cursor].KeyID)
+		mk.auths, _ = storage.FindAuthorizationsForKey(context.Background(), mk.db, mk.keys[mk.cursor].KeyID)
 	}
 }
 
@@ -113,7 +114,7 @@ func (m Model) updateKeyList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "y":
 			if m.manageKeys.confirmRevoke {
 				key := m.manageKeys.keys[m.manageKeys.cursor]
-				if err := storage.RevokeSigningKey(m.manageKeys.db, key.KeyID); err != nil {
+				if err := storage.RevokeSigningKey(context.Background(), m.manageKeys.db, key.KeyID); err != nil {
 					m.manageKeys.status = fmt.Sprintf("Error: %v", err)
 					m.manageKeys.isError = true
 				} else {
@@ -174,7 +175,7 @@ func (m Model) updateKeyDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "y":
 			if m.manageKeys.confirmRevoke {
 				auth := m.manageKeys.auths[m.manageKeys.authCursor]
-				if err := storage.RevokeAuthorization(m.manageKeys.db, auth.TokenID); err != nil {
+				if err := storage.RevokeAuthorization(context.Background(), m.manageKeys.db, auth.TokenID); err != nil {
 					m.manageKeys.status = fmt.Sprintf("Error: %v", err)
 					m.manageKeys.isError = true
 				} else {
@@ -316,7 +317,7 @@ func (m Model) renderKeyRow(b *strings.Builder, i int) {
 		style = m.s.Selected
 	}
 
-	auths, _ := storage.FindAuthorizationsForKey(m.db, key.KeyID)
+	auths, _ := storage.FindAuthorizationsForKey(context.Background(), m.db, key.KeyID)
 	scopeLabel := scopeSummary(auths)
 	tier := tierBadge(auths)
 	authCount := len(auths)

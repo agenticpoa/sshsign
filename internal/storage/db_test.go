@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/agenticpoa/sshsign/internal/storage"
@@ -24,10 +25,10 @@ func TestMigrateCreatesTablesIdempotent(t *testing.T) {
 	defer db.Close()
 
 	// Run migrate twice, should not error
-	if err := storage.Migrate(db); err != nil {
+	if err := storage.Migrate(context.Background(), db); err != nil {
 		t.Fatalf("first migration: %v", err)
 	}
-	if err := storage.Migrate(db); err != nil {
+	if err := storage.Migrate(context.Background(), db); err != nil {
 		t.Fatalf("second migration: %v", err)
 	}
 
@@ -62,7 +63,7 @@ func TestMigrateBaselinesLegacyDatabase(t *testing.T) {
 		t.Fatalf("seeding legacy users table: %v", err)
 	}
 
-	if err := storage.Migrate(db); err != nil {
+	if err := storage.Migrate(context.Background(), db); err != nil {
 		t.Fatalf("baselining: %v", err)
 	}
 
@@ -87,7 +88,7 @@ func TestMigrateRunsFreshSchema(t *testing.T) {
 	}
 	defer db.Close()
 
-	if err := storage.Migrate(db); err != nil {
+	if err := storage.Migrate(context.Background(), db); err != nil {
 		t.Fatalf("migrating fresh DB: %v", err)
 	}
 

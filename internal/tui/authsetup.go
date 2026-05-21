@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strconv"
@@ -170,7 +171,7 @@ func formatNumber(f float64) string {
 }
 
 func newAuthSetupModel(db *sql.DB, user *storage.User, r *lipgloss.Renderer) authSetupModel {
-	keys, _ := storage.ListSigningKeys(db, user.UserID)
+	keys, _ := storage.ListSigningKeys(context.Background(), db, user.UserID)
 
 	var active []storage.SigningKey
 	for _, k := range keys {
@@ -1103,6 +1104,7 @@ func (m Model) handleCreateAuth() (tea.Model, tea.Cmd) {
 	// Persist pending key if this is a new key from the wizard
 	if m.authSetup.pendingPubSSH != "" {
 		_, err := storage.CreateSigningKeyWithID(
+			context.Background(),
 			m.authSetup.db, m.authSetup.selectedKeyID, m.authSetup.user.UserID,
 			m.authSetup.pendingPubSSH, m.authSetup.pendingEncPriv, m.authSetup.pendingWrappedDEK,
 			m.authSetup.pendingKEKAlgo,
@@ -1121,6 +1123,7 @@ func (m Model) handleCreateAuth() (tea.Model, tea.Cmd) {
 	expires := time.Now().AddDate(0, 0, m.authSetup.expiryDays)
 
 	_, err := storage.CreateAuthorizationFull(
+		context.Background(),
 		m.authSetup.db, m.authSetup.selectedKeyID, m.authSetup.user.UserID,
 		scopes, constraints, metaConstraints, m.authSetup.confirmationTier, m.authSetup.requireSignature,
 		hardRules, softRules, &expires,
@@ -1133,7 +1136,7 @@ func (m Model) handleCreateAuth() (tea.Model, tea.Cmd) {
 
 	// If editing an existing auth, revoke the old one
 	if m.authSetup.replacingTokenID != "" {
-		storage.RevokeAuthorization(m.authSetup.db, m.authSetup.replacingTokenID)
+		storage.RevokeAuthorization(context.Background(), m.authSetup.db, m.authSetup.replacingTokenID)
 	}
 
 	if m.authSetup.fromWizard {

@@ -1,14 +1,15 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
 )
 
 // SaveEvidenceEnvelope stores a sealed evidence envelope for a pending signature.
-func SaveEvidenceEnvelope(db *sql.DB, pendingID string, data []byte, hash string) error {
-	_, err := db.Exec(
+func SaveEvidenceEnvelope(ctx context.Context, db *sql.DB, pendingID string, data []byte, hash string) error {
+	_, err := db.ExecContext(ctx,
 		`INSERT INTO evidence_envelopes (pending_id, data, hash) VALUES (?, ?, ?)`,
 		pendingID, data, hash,
 	)
@@ -19,8 +20,8 @@ func SaveEvidenceEnvelope(db *sql.DB, pendingID string, data []byte, hash string
 }
 
 // GetEvidenceEnvelope retrieves a sealed evidence envelope by pending ID.
-func GetEvidenceEnvelope(db *sql.DB, pendingID string) (*EvidenceEnvelope, error) {
-	row := db.QueryRow(
+func GetEvidenceEnvelope(ctx context.Context, db *sql.DB, pendingID string) (*EvidenceEnvelope, error) {
+	row := db.QueryRowContext(ctx,
 		`SELECT pending_id, data, hash, created_at FROM evidence_envelopes WHERE pending_id = ?`,
 		pendingID,
 	)

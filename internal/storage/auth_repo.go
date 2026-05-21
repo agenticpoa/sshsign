@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -8,12 +9,12 @@ import (
 )
 
 // CreateAuthorization creates a new authorization token for a signing key.
-func CreateAuthorization(db *sql.DB, signingKeyID, grantedBy string, scopes []string, constraints map[string][]string, hardRules, softRules []string, expiresAt *time.Time) (*Authorization, error) {
-	return CreateAuthorizationFull(db, signingKeyID, grantedBy, scopes, constraints, nil, "", false, hardRules, softRules, expiresAt)
+func CreateAuthorization(ctx context.Context, db *sql.DB, signingKeyID, grantedBy string, scopes []string, constraints map[string][]string, hardRules, softRules []string, expiresAt *time.Time) (*Authorization, error) {
+	return CreateAuthorizationFull(ctx, db, signingKeyID, grantedBy, scopes, constraints, nil, "", false, hardRules, softRules, expiresAt)
 }
 
 // CreateAuthorizationFull creates an authorization with all fields including metadata constraints and confirmation tier.
-func CreateAuthorizationFull(db *sql.DB, signingKeyID, grantedBy string, scopes []string, constraints map[string][]string, metadataConstraints []MetadataConstraint, confirmationTier string, requireSignature bool, hardRules, softRules []string, expiresAt *time.Time) (*Authorization, error) {
+func CreateAuthorizationFull(ctx context.Context, db *sql.DB, signingKeyID, grantedBy string, scopes []string, constraints map[string][]string, metadataConstraints []MetadataConstraint, confirmationTier string, requireSignature bool, hardRules, softRules []string, expiresAt *time.Time) (*Authorization, error) {
 	tokenID := NewTokenID()
 
 	if confirmationTier == "" {
@@ -32,7 +33,7 @@ func CreateAuthorizationFull(db *sql.DB, signingKeyID, grantedBy string, scopes 
 		expiresAtStr = &s
 	}
 
-	_, err := db.Exec(
+	_, err := db.ExecContext(ctx,
 		`INSERT INTO authorizations (token_id, signing_key_id, granted_by, scopes, constraints, metadata_constraints, confirmation_tier, require_signature, hard_rules, soft_rules, expires_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tokenID, signingKeyID, grantedBy,
@@ -44,12 +45,12 @@ func CreateAuthorizationFull(db *sql.DB, signingKeyID, grantedBy string, scopes 
 		return nil, fmt.Errorf("inserting authorization: %w", err)
 	}
 
-	return GetAuthorization(db, tokenID)
+	return GetAuthorization(ctx, db, tokenID)
 }
 
 // GetAuthorization retrieves an authorization by its token ID.
-func GetAuthorization(db *sql.DB, tokenID string) (*Authorization, error) {
-	row := db.QueryRow(
+func GetAuthorization(ctx context.Context, db *sql.DB, tokenID string) (*Authorization, error) {
+	row := db.QueryRowContext(ctx,
 		`SELECT token_id, signing_key_id, granted_by, scopes, constraints, metadata_constraints, confirmation_tier, require_signature, hard_rules, soft_rules, expires_at, revoked_at, created_at
 		 FROM authorizations WHERE token_id = ?`,
 		tokenID,
@@ -62,8 +63,8 @@ func GetAuthorization(db *sql.DB, tokenID string) (*Authorization, error) {
 // — auth/engine.go re-checks expiry on each evaluation — but keeping
 // expired rows out of storage results shrinks the surface area passed
 // through to the decision engine.
-func FindAuthorizationsForKey(db *sql.DB, signingKeyID string) ([]Authorization, error) {
-	rows, err := db.Query(
+func FindAuthorizationsForKey(ctx context.Context, db *sql.DB, signingKeyID string) ([]Authorization, error) {
+	rows, err := db.QueryContext(ctx,
 		`SELECT token_id, signing_key_id, granted_by, scopes, constraints, metadata_constraints, confirmation_tier, require_signature, hard_rules, soft_rules, expires_at, revoked_at, created_at
 		 FROM authorizations
 		 WHERE signing_key_id = ?
@@ -89,8 +90,8 @@ func FindAuthorizationsForKey(db *sql.DB, signingKeyID string) ([]Authorization,
 }
 
 // RevokeAuthorization marks an authorization as revoked.
-func RevokeAuthorization(db *sql.DB, tokenID string) error {
-	result, err := db.Exec(
+func RevokeAuthorization(ctx context.Context, db *sql.DB, tokenID string) error {
+	result, err := db.ExecContext(ctx,
 		`UPDATE authorizations SET revoked_at = datetime('now') WHERE token_id = ? AND revoked_at IS NULL`,
 		tokenID,
 	)

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -59,8 +60,8 @@ var migrations = []migration{
 // Safe to call on fresh, legacy (pre-versioning), and already-migrated
 // databases — see baselineIfLegacy for how existing column-migration
 // DBs roll forward without re-running the ALTERs.
-func Migrate(db *sql.DB) error {
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+func Migrate(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version    INTEGER PRIMARY KEY,
 		name       TEXT NOT NULL,
 		applied_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -68,11 +69,11 @@ func Migrate(db *sql.DB) error {
 		return fmt.Errorf("creating schema_migrations: %w", err)
 	}
 
-	if err := baselineIfLegacy(db); err != nil {
+	if err := baselineIfLegacy(ctx, db); err != nil {
 		return fmt.Errorf("baselining legacy schema: %w", err)
 	}
 
-	applied, err := loadAppliedVersions(db)
+	applied, err := loadAppliedVersions(ctx, db)
 	if err != nil {
 		return fmt.Errorf("loading applied versions: %w", err)
 	}
@@ -81,24 +82,24 @@ func Migrate(db *sql.DB) error {
 		if applied[m.version] {
 			continue
 		}
-		if err := runMigration(db, m); err != nil {
+		if err := runMigration(ctx, db, m); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func runMigration(db *sql.DB, m migration) error {
-	tx, err := db.Begin()
+func runMigration(ctx context.Context, db *sql.DB, m migration) error {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx for v%d (%s): %w", m.version, m.name, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	if _, err := tx.Exec(m.up); err != nil {
+	if _, err := tx.ExecContext(ctx, m.up); err != nil {
 		return fmt.Errorf("running migration v%d (%s): %w", m.version, m.name, err)
 	}
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO schema_migrations (version, name) VALUES (?, ?)`,
 		m.version, m.name,
 	); err != nil {
@@ -107,8 +108,8 @@ func runMigration(db *sql.DB, m migration) error {
 	return tx.Commit()
 }
 
-func loadAppliedVersions(db *sql.DB) (map[int]bool, error) {
-	rows, err := db.Query(`SELECT version FROM schema_migrations`)
+func loadAppliedVersions(ctx context.Context, db *sql.DB) (map[int]bool, error) {
+	rows, err := db.QueryContext(ctx, `SELECT version FROM schema_migrations`)
 	if err != nil {
 		return nil, err
 	}
@@ -132,9 +133,9 @@ func loadAppliedVersions(db *sql.DB) (map[int]bool, error) {
 // exists." Fresh databases have neither, and roll through the normal
 // migration path. Already-versioned databases have applied rows and
 // skip this entirely.
-func baselineIfLegacy(db *sql.DB) error {
+func baselineIfLegacy(ctx context.Context, db *sql.DB) error {
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		return err
 	}
 	if count > 0 {
@@ -142,7 +143,7 @@ func baselineIfLegacy(db *sql.DB) error {
 	}
 
 	var name string
-	err := db.QueryRow(
+	err := db.QueryRowContext(ctx,
 		`SELECT name FROM sqlite_master WHERE type='table' AND name='users'`,
 	).Scan(&name)
 	if err == sql.ErrNoRows {
@@ -156,7 +157,7 @@ func baselineIfLegacy(db *sql.DB) error {
 	// re-create tables or re-add columns that the old loop already put
 	// in place.
 	for _, m := range migrations {
-		if _, err := db.Exec(
+		if _, err := db.ExecContext(ctx,
 			`INSERT INTO schema_migrations (version, name) VALUES (?, ?)`,
 			m.version, m.name,
 		); err != nil {

@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/agenticpoa/sshsign/internal/storage"
@@ -9,7 +10,7 @@ import (
 func TestCreateAndGetSigningKey(t *testing.T) {
 	tdb := testDB(t)
 
-	user, _, err := storage.CreateUser(tdb.DB, "SHA256:owner", "ssh-ed25519 AAAAowner")
+	user, _, err := storage.CreateUser(context.Background(), tdb.DB, "SHA256:owner", "ssh-ed25519 AAAAowner")
 	if err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
@@ -17,7 +18,7 @@ func TestCreateAndGetSigningKey(t *testing.T) {
 	encPrivKey := []byte("encrypted-private-key-data")
 	encDEK := []byte("encrypted-dek-data")
 
-	sk, err := storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAAsigning", encPrivKey, encDEK, "")
+	sk, err := storage.CreateSigningKey(context.Background(), tdb.DB, user.UserID, "ssh-ed25519 AAAAsigning", encPrivKey, encDEK, "")
 	if err != nil {
 		t.Fatalf("creating signing key: %v", err)
 	}
@@ -33,7 +34,7 @@ func TestCreateAndGetSigningKey(t *testing.T) {
 	}
 
 	// Retrieve by ID
-	found, err := storage.GetSigningKey(tdb.DB, sk.KeyID)
+	found, err := storage.GetSigningKey(context.Background(), tdb.DB, sk.KeyID)
 	if err != nil {
 		t.Fatalf("getting signing key: %v", err)
 	}
@@ -51,22 +52,22 @@ func TestCreateAndGetSigningKey(t *testing.T) {
 func TestListSigningKeys(t *testing.T) {
 	tdb := testDB(t)
 
-	user, _, err := storage.CreateUser(tdb.DB, "SHA256:lister", "ssh-ed25519 AAAAlister")
+	user, _, err := storage.CreateUser(context.Background(), tdb.DB, "SHA256:lister", "ssh-ed25519 AAAAlister")
 	if err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
 
-	_, err = storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAA1", []byte("enc1"), []byte("dek1"), "")
+	_, err = storage.CreateSigningKey(context.Background(), tdb.DB, user.UserID, "ssh-ed25519 AAAA1", []byte("enc1"), []byte("dek1"), "")
 	if err != nil {
 		t.Fatalf("creating first key: %v", err)
 	}
 
-	_, err = storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAA2", []byte("enc2"), []byte("dek2"), "")
+	_, err = storage.CreateSigningKey(context.Background(), tdb.DB, user.UserID, "ssh-ed25519 AAAA2", []byte("enc2"), []byte("dek2"), "")
 	if err != nil {
 		t.Fatalf("creating second key: %v", err)
 	}
 
-	keys, err := storage.ListSigningKeys(tdb.DB, user.UserID)
+	keys, err := storage.ListSigningKeys(context.Background(), tdb.DB, user.UserID)
 	if err != nil {
 		t.Fatalf("listing keys: %v", err)
 	}
@@ -78,7 +79,7 @@ func TestListSigningKeys(t *testing.T) {
 func TestGetNonexistentSigningKey(t *testing.T) {
 	tdb := testDB(t)
 
-	sk, err := storage.GetSigningKey(tdb.DB, "ak_nonexistent")
+	sk, err := storage.GetSigningKey(context.Background(), tdb.DB, "ak_nonexistent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,21 +91,21 @@ func TestGetNonexistentSigningKey(t *testing.T) {
 func TestRevokeSigningKey(t *testing.T) {
 	tdb := testDB(t)
 
-	user, _, err := storage.CreateUser(tdb.DB, "SHA256:revoker", "ssh-ed25519 AAAArevoker")
+	user, _, err := storage.CreateUser(context.Background(), tdb.DB, "SHA256:revoker", "ssh-ed25519 AAAArevoker")
 	if err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
 
-	sk, err := storage.CreateSigningKey(tdb.DB, user.UserID, "ssh-ed25519 AAAArevoke", []byte("enc"), []byte("dek"), "")
+	sk, err := storage.CreateSigningKey(context.Background(), tdb.DB, user.UserID, "ssh-ed25519 AAAArevoke", []byte("enc"), []byte("dek"), "")
 	if err != nil {
 		t.Fatalf("creating signing key: %v", err)
 	}
 
-	if err := storage.RevokeSigningKey(tdb.DB, sk.KeyID); err != nil {
+	if err := storage.RevokeSigningKey(context.Background(), tdb.DB, sk.KeyID); err != nil {
 		t.Fatalf("revoking key: %v", err)
 	}
 
-	found, err := storage.GetSigningKey(tdb.DB, sk.KeyID)
+	found, err := storage.GetSigningKey(context.Background(), tdb.DB, sk.KeyID)
 	if err != nil {
 		t.Fatalf("getting revoked key: %v", err)
 	}
@@ -113,7 +114,7 @@ func TestRevokeSigningKey(t *testing.T) {
 	}
 
 	// Revoking again should fail
-	if err := storage.RevokeSigningKey(tdb.DB, sk.KeyID); err == nil {
+	if err := storage.RevokeSigningKey(context.Background(), tdb.DB, sk.KeyID); err == nil {
 		t.Error("expected error when revoking already-revoked key")
 	}
 }

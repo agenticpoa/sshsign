@@ -14,7 +14,7 @@ import (
 )
 
 func handleKeys(sess ssh.Session, sc *SessionContext) {
-	keys, err := storage.ListSigningKeys(sc.DB, sc.User.UserID)
+	keys, err := storage.ListSigningKeys(sess.Context(), sc.DB, sc.User.UserID)
 	if err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("listing keys: %v", err)})
 		return
@@ -177,7 +177,7 @@ func handleCreateKey(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 
 	// Persist key
-	sk, err := storage.CreateSigningKey(sc.DB, sc.User.UserID, pubSSH, encPrivKey, wrappedDEK, kekAlgo)
+	sk, err := storage.CreateSigningKey(sess.Context(), sc.DB, sc.User.UserID, pubSSH, encPrivKey, wrappedDEK, kekAlgo)
 	if err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("storing key: %v", err)})
 		return
@@ -186,6 +186,7 @@ func handleCreateKey(sess ssh.Session, sc *SessionContext, args []string) {
 	// Create authorization
 	expires := time.Now().AddDate(0, 0, expiryDays)
 	authorization, err := storage.CreateAuthorizationFull(
+		sess.Context(),
 		sc.DB, sk.KeyID, sc.User.UserID,
 		[]string{scope}, nil, metaConstraints, tier, requireSignature,
 		nil, nil, &expires,
@@ -223,7 +224,7 @@ func handleRevoke(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 
 	// Verify ownership
-	sk, err := storage.GetSigningKey(sc.DB, keyID)
+	sk, err := storage.GetSigningKey(sess.Context(), sc.DB, keyID)
 	if err != nil || sk == nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("signing key %s not found", keyID)})
 		return
@@ -233,7 +234,7 @@ func handleRevoke(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	if err := storage.RevokeSigningKey(sc.DB, keyID); err != nil {
+	if err := storage.RevokeSigningKey(sess.Context(), sc.DB, keyID); err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("revoking key: %v", err)})
 		return
 	}

@@ -1,6 +1,9 @@
 package storage
 
-import "database/sql"
+import (
+	"context"
+	"database/sql"
+)
 
 // TestDB wraps a sql.DB for testing with a migrated in-memory database.
 type TestDB struct {
@@ -12,7 +15,7 @@ func NewTestDB() (*TestDB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := Migrate(db); err != nil {
+	if err := Migrate(context.Background(), db); err != nil {
 		db.Close()
 		return nil, err
 	}

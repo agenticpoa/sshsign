@@ -14,7 +14,7 @@ import (
 )
 
 func handlePending(sess ssh.Session, sc *SessionContext) {
-	pending, err := storage.ListPendingSignatures(sc.DB, sc.User.UserID)
+	pending, err := storage.ListPendingSignatures(sess.Context(), sc.DB, sc.User.UserID)
 	if err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("listing pending signatures: %v", err)})
 		return
@@ -65,7 +65,7 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	ps, err := storage.GetPendingSignature(sc.DB, pendingID)
+	ps, err := storage.GetPendingSignature(sess.Context(), sc.DB, pendingID)
 	if err != nil || ps == nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("pending signature %s not found", pendingID)})
 		return
@@ -88,7 +88,7 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 
 	// Only the principal (authorization granter) can approve
-	authToken, err := storage.GetAuthorization(sc.DB, ps.AuthTokenID)
+	authToken, err := storage.GetAuthorization(sess.Context(), sc.DB, ps.AuthTokenID)
 	if err != nil || authToken == nil {
 		writeJSON(sess, errorResponse{Error: "authorization not found"})
 		return
@@ -109,7 +109,7 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 
 	// Check signing key hasn't been revoked
-	sk, err := storage.GetSigningKey(sc.DB, ps.SigningKeyID)
+	sk, err := storage.GetSigningKey(sess.Context(), sc.DB, ps.SigningKeyID)
 	if err != nil || sk == nil {
 		writeJSON(sess, errorResponse{Error: "signing key not found"})
 		return
@@ -121,7 +121,7 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 
 	// If require_signature is set, check for evidence envelope (web approval)
 	if authToken.RequireSignature {
-		env, _ := storage.GetEvidenceEnvelope(sc.DB, pendingID)
+		env, _ := storage.GetEvidenceEnvelope(sess.Context(), sc.DB, pendingID)
 		if env == nil {
 			writeJSON(sess, errorResponse{Error: "this approval requires a handwritten signature: open the approval URL returned at sign time"})
 			return
@@ -164,7 +164,7 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 
 	// Mark as approved and persist signature
-	if err := storage.ResolvePendingSignature(sc.DB, pendingID, "approved", sc.User.UserID, string(sig)); err != nil {
+	if err := storage.ResolvePendingSignature(sess.Context(), sc.DB, pendingID, "approved", sc.User.UserID, string(sig)); err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("resolving pending signature: %v", err)})
 		return
 	}
@@ -179,7 +179,7 @@ func handleApprove(sess ssh.Session, sc *SessionContext, args []string) {
 		Result:             "SIGNED",
 		Signature:          string(sig),
 	})
-	storage.RecordKeyUsage(sc.DB, sk.KeyID)
+	storage.RecordKeyUsage(sess.Context(), sc.DB, sk.KeyID)
 
 	log.Printf("APPROVED pending %s by %s, signed with key %s audit_tx=%d", pendingID, sc.User.UserID, sk.KeyID, auditTxID)
 

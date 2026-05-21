@@ -1,16 +1,17 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
 )
 
 // CreateNegotiationOffer logs a new offer in a negotiation chain.
-func CreateNegotiationOffer(db *sql.DB, negotiationID string, round int, fromParty, offerType, metadata string, previousTx, auditTxID uint64, userID string) (*NegotiationOffer, error) {
+func CreateNegotiationOffer(ctx context.Context, db *sql.DB, negotiationID string, round int, fromParty, offerType, metadata string, previousTx, auditTxID uint64, userID string) (*NegotiationOffer, error) {
 	id := NewOfferID()
 
-	_, err := db.Exec(
+	_, err := db.ExecContext(ctx,
 		`INSERT INTO negotiation_offers (id, negotiation_id, round, from_party, offer_type, metadata, previous_tx, audit_tx_id, user_id)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, negotiationID, round, fromParty, offerType, metadata, previousTx, auditTxID, userID,
@@ -19,12 +20,12 @@ func CreateNegotiationOffer(db *sql.DB, negotiationID string, round int, fromPar
 		return nil, fmt.Errorf("inserting negotiation offer: %w", err)
 	}
 
-	return GetNegotiationOffer(db, id)
+	return GetNegotiationOffer(ctx, db, id)
 }
 
 // GetNegotiationOffer retrieves an offer by its ID.
-func GetNegotiationOffer(db *sql.DB, id string) (*NegotiationOffer, error) {
-	row := db.QueryRow(
+func GetNegotiationOffer(ctx context.Context, db *sql.DB, id string) (*NegotiationOffer, error) {
+	row := db.QueryRowContext(ctx,
 		`SELECT id, negotiation_id, round, from_party, offer_type, metadata, previous_tx, audit_tx_id, user_id, created_at
 		 FROM negotiation_offers WHERE id = ?`, id,
 	)
@@ -43,8 +44,8 @@ func GetNegotiationOffer(db *sql.DB, id string) (*NegotiationOffer, error) {
 }
 
 // ListNegotiationOffers returns all offers for a negotiation, ordered by round.
-func ListNegotiationOffers(db *sql.DB, negotiationID string) ([]NegotiationOffer, error) {
-	rows, err := db.Query(
+func ListNegotiationOffers(ctx context.Context, db *sql.DB, negotiationID string) ([]NegotiationOffer, error) {
+	rows, err := db.QueryContext(ctx,
 		`SELECT id, negotiation_id, round, from_party, offer_type, metadata, previous_tx, audit_tx_id, user_id, created_at
 		 FROM negotiation_offers WHERE negotiation_id = ?
 		 ORDER BY round, created_at`, negotiationID,
@@ -69,8 +70,8 @@ func ListNegotiationOffers(db *sql.DB, negotiationID string) ([]NegotiationOffer
 }
 
 // GetLastOffer returns the most recent offer in a negotiation, or nil if none exist.
-func GetLastOffer(db *sql.DB, negotiationID string) (*NegotiationOffer, error) {
-	row := db.QueryRow(
+func GetLastOffer(ctx context.Context, db *sql.DB, negotiationID string) (*NegotiationOffer, error) {
+	row := db.QueryRowContext(ctx,
 		`SELECT id, negotiation_id, round, from_party, offer_type, metadata, previous_tx, audit_tx_id, user_id, created_at
 		 FROM negotiation_offers WHERE negotiation_id = ?
 		 ORDER BY round DESC, created_at DESC LIMIT 1`, negotiationID,
@@ -90,8 +91,8 @@ func GetLastOffer(db *sql.DB, negotiationID string) (*NegotiationOffer, error) {
 }
 
 // FindOfferByAuditTx checks if an offer with the given audit_tx_id exists.
-func FindOfferByAuditTx(db *sql.DB, auditTxID uint64) (*NegotiationOffer, error) {
-	row := db.QueryRow(
+func FindOfferByAuditTx(ctx context.Context, db *sql.DB, auditTxID uint64) (*NegotiationOffer, error) {
+	row := db.QueryRowContext(ctx,
 		`SELECT id, negotiation_id, round, from_party, offer_type, metadata, previous_tx, audit_tx_id, user_id, created_at
 		 FROM negotiation_offers WHERE audit_tx_id = ?`, auditTxID,
 	)

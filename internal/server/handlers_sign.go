@@ -82,7 +82,7 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 	// Find a signing key
 	var sk *storage.SigningKey
 	if keyID != "" {
-		sk, err = storage.GetSigningKey(sc.DB, keyID)
+		sk, err = storage.GetSigningKey(sess.Context(), sc.DB, keyID)
 		if err != nil || sk == nil {
 			writeJSON(sess, errorResponse{Error: fmt.Sprintf("signing key %s not found", keyID)})
 			return
@@ -93,7 +93,7 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 		}
 	} else {
 		// Use first active signing key
-		keys, err := storage.ListSigningKeys(sc.DB, sc.User.UserID)
+		keys, err := storage.ListSigningKeys(sess.Context(), sc.DB, sc.User.UserID)
 		if err != nil {
 			writeJSON(sess, errorResponse{Error: fmt.Sprintf("listing signing keys: %v", err)})
 			return
@@ -117,7 +117,7 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 	}
 
 	// Check authorization
-	auths, err := storage.FindAuthorizationsForKey(sc.DB, sk.KeyID)
+	auths, err := storage.FindAuthorizationsForKey(sess.Context(), sc.DB, sk.KeyID)
 	if err != nil {
 		writeJSON(sess, errorResponse{Error: fmt.Sprintf("checking authorization: %v", err)})
 		return
@@ -194,6 +194,7 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 			Metadata:     metadataJSON,
 		})
 		ps, err := storage.CreatePendingSignature(
+			sess.Context(),
 			sc.DB, sk.KeyID, decision.TokenID, sc.User.UserID,
 			actionType, payloadHash, metadataJSON,
 			apoacrypto.HashApprovalToken(approvalToken), sessionID,
@@ -250,7 +251,7 @@ func handleSign(sess ssh.Session, sc *SessionContext, args []string) {
 		Result:             "SIGNED",
 		Signature:          string(sig),
 	})
-	storage.RecordKeyUsage(sc.DB, sk.KeyID)
+	storage.RecordKeyUsage(sess.Context(), sc.DB, sk.KeyID)
 
 	log.Printf("SIGNED %s for %s key %s token %s audit_tx=%d", actionType, sc.User.UserID, sk.KeyID, decision.TokenID, auditTxID)
 
@@ -297,7 +298,7 @@ func handleVerify(sess ssh.Session, sc *SessionContext, args []string) {
 		return
 	}
 
-	sk, err := storage.GetSigningKey(sc.DB, keyID)
+	sk, err := storage.GetSigningKey(sess.Context(), sc.DB, keyID)
 	if err != nil || sk == nil {
 		writeJSON(sess, verifyResponse{Valid: false, Error: fmt.Sprintf("signing key %s not found", keyID)})
 		return

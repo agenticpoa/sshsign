@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/agenticpoa/sshsign/internal/storage"
@@ -9,7 +10,7 @@ import (
 func TestCreateUserAndFind(t *testing.T) {
 	tdb := testDB(t)
 
-	user, key, err := storage.CreateUser(tdb.DB, "SHA256:abc123", "ssh-ed25519 AAAAC3test")
+	user, key, err := storage.CreateUser(context.Background(), tdb.DB, "SHA256:abc123", "ssh-ed25519 AAAAC3test")
 	if err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
@@ -25,7 +26,7 @@ func TestCreateUserAndFind(t *testing.T) {
 	}
 
 	// Find by fingerprint
-	foundUser, foundKey, err := storage.FindUserByFingerprint(tdb.DB, "SHA256:abc123")
+	foundUser, foundKey, err := storage.FindUserByFingerprint(context.Background(), tdb.DB, "SHA256:abc123")
 	if err != nil {
 		t.Fatalf("finding user: %v", err)
 	}
@@ -40,7 +41,7 @@ func TestCreateUserAndFind(t *testing.T) {
 func TestFindNonexistentUser(t *testing.T) {
 	tdb := testDB(t)
 
-	user, key, err := storage.FindUserByFingerprint(tdb.DB, "SHA256:nonexistent")
+	user, key, err := storage.FindUserByFingerprint(context.Background(), tdb.DB, "SHA256:nonexistent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,18 +53,18 @@ func TestFindNonexistentUser(t *testing.T) {
 func TestLinkKeyToExistingUser(t *testing.T) {
 	tdb := testDB(t)
 
-	user, _, err := storage.CreateUser(tdb.DB, "SHA256:first", "ssh-ed25519 AAAAfirst")
+	user, _, err := storage.CreateUser(context.Background(), tdb.DB, "SHA256:first", "ssh-ed25519 AAAAfirst")
 	if err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
 
-	_, err = storage.LinkKey(tdb.DB, user.UserID, "SHA256:second", "ssh-ed25519 AAAAsecond", "work laptop")
+	_, err = storage.LinkKey(context.Background(), tdb.DB, user.UserID, "SHA256:second", "ssh-ed25519 AAAAsecond", "work laptop")
 	if err != nil {
 		t.Fatalf("linking key: %v", err)
 	}
 
 	// Find by second key should return same user
-	foundUser, foundKey, err := storage.FindUserByFingerprint(tdb.DB, "SHA256:second")
+	foundUser, foundKey, err := storage.FindUserByFingerprint(context.Background(), tdb.DB, "SHA256:second")
 	if err != nil {
 		t.Fatalf("finding user by second key: %v", err)
 	}
@@ -78,13 +79,13 @@ func TestLinkKeyToExistingUser(t *testing.T) {
 func TestLinkDuplicateFingerprint(t *testing.T) {
 	tdb := testDB(t)
 
-	user, _, err := storage.CreateUser(tdb.DB, "SHA256:dup", "ssh-ed25519 AAAAdup")
+	user, _, err := storage.CreateUser(context.Background(), tdb.DB, "SHA256:dup", "ssh-ed25519 AAAAdup")
 	if err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
 
 	// Linking same fingerprint again should fail
-	_, err = storage.LinkKey(tdb.DB, user.UserID, "SHA256:dup", "ssh-ed25519 AAAAdup", "duplicate")
+	_, err = storage.LinkKey(context.Background(), tdb.DB, user.UserID, "SHA256:dup", "ssh-ed25519 AAAAdup", "duplicate")
 	if err == nil {
 		t.Error("expected error when linking duplicate fingerprint")
 	}
@@ -93,17 +94,17 @@ func TestLinkDuplicateFingerprint(t *testing.T) {
 func TestListUserKeys(t *testing.T) {
 	tdb := testDB(t)
 
-	user, _, err := storage.CreateUser(tdb.DB, "SHA256:k1", "ssh-ed25519 AAAAk1")
+	user, _, err := storage.CreateUser(context.Background(), tdb.DB, "SHA256:k1", "ssh-ed25519 AAAAk1")
 	if err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
 
-	_, err = storage.LinkKey(tdb.DB, user.UserID, "SHA256:k2", "ssh-ed25519 AAAAk2", "second key")
+	_, err = storage.LinkKey(context.Background(), tdb.DB, user.UserID, "SHA256:k2", "ssh-ed25519 AAAAk2", "second key")
 	if err != nil {
 		t.Fatalf("linking key: %v", err)
 	}
 
-	keys, err := storage.ListUserKeys(tdb.DB, user.UserID)
+	keys, err := storage.ListUserKeys(context.Background(), tdb.DB, user.UserID)
 	if err != nil {
 		t.Fatalf("listing keys: %v", err)
 	}
