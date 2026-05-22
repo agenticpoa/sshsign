@@ -7,8 +7,16 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+
 	"github.com/agenticpoa/sshsign/internal/storage"
 )
+
+// titler converts snake_case_words to "Title Case Words" for the
+// approval-page field labels. Constructed once because cases.Caser
+// is meant to be reused per-language.
+var titler = cases.Title(language.English)
 
 // partyFields are metadata keys that describe parties, not deal terms.
 var partyFields = map[string]bool{
@@ -402,7 +410,7 @@ func formatFieldLabel(field string) string {
 	if label, ok := knownLabels[field]; ok {
 		return label
 	}
-	return strings.Title(strings.ReplaceAll(field, "_", " "))
+	return titler.String(strings.ReplaceAll(field, "_", " "))
 }
 
 func formatScope(scope string) string {

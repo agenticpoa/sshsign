@@ -12,6 +12,7 @@ require (
 	github.com/codenotary/immudb v1.10.0
 	github.com/muesli/termenv v0.16.0
 	golang.org/x/crypto v0.49.0
+	golang.org/x/text v0.35.0
 	golang.org/x/time v0.15.0
 	modernc.org/sqlite v1.48.0
 )
@@ -84,7 +85,6 @@ require (
 	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/term v0.41.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
 	google.golang.org/genproto v0.0.0-20230803162519-f966b187b2e5 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20230822172742-b8732ec3820d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230822172742-b8732ec3820d // indirect
