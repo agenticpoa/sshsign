@@ -86,6 +86,15 @@ echo '{"valuation_cap": 8000000}' | ssh sshsign.dev sign \
   --key-id ak_xxx \
   --metadata '{"valuation_cap": 8000000, "discount_rate": 0.20}'
 
+# For metadata with spaces or special characters, use the -b64 variant.
+# SSH strips inner double quotes and splits on spaces, so JSON like
+# {"company":"Blue Fund"} mangles in transit. Encoding it as base64
+# transports opaquely:
+echo '{"valuation_cap": 8000000}' | ssh sshsign.dev sign \
+  --type safe-agreement \
+  --key-id ak_xxx \
+  --metadata-b64 "$(echo -n '{"company":"Blue Fund"}' | base64)"
+
 # Retrieve the evidence envelope after web approval
 ssh sshsign.dev get-envelope --id pnd_xxx
 
@@ -272,6 +281,9 @@ The same pattern applies to lending rounds, vendor contract negotiations, DAO pr
 ## Running the server
 
 ```bash
+# SSHSIGN_KEK_SECRET is the master secret. It must be at least 32
+# characters. Lose it and every wrapped signing key in the database
+# becomes unrecoverable.
 export SSHSIGN_KEK_SECRET="$(openssl rand -hex 32)"
 
 # Optional
@@ -286,6 +298,15 @@ export SSHSIGN_IMMUDB_ADDRESS="127.0.0.1"
 
 go run ./cmd/sshsign-server/
 ```
+
+**Backup discipline:** the server stores a per-server salt in the
+`server_config` table inside the database. Argon2id-derived KEKs and
+the HKDF-derived audit chain key both depend on this salt — backing
+up the DB without the salt row means every wrapped DEK and every
+audit chain entry becomes unrecoverable. Back up the whole file.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full security posture
+(KEK derivation, audit chain, pending-row MAC, rotation gotchas).
 
 ## Architecture
 
