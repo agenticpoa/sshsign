@@ -68,5 +68,8 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.62
+          # Need a binary built against the Go version in go.mod
+          # (1.26+). Pinning latest because stable lint releases lag
+          # the bleeding-edge Go toolchain by months.
+          version: latest
           args: --timeout=5m
