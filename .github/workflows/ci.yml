@@ -65,11 +65,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Install golangci-lint
+        # Building from source via `go install` uses the local
+        # toolchain (1.26 from go.mod) so the resulting lint binary
+        # supports the same Go language version this repo targets.
+        # Prebuilt releases of golangci-lint lag the bleeding-edge
+        # toolchain by months — go.mod's `go 1.26.1` is too new for
+        # the official binaries as of this commit.
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          # Need a binary built against the Go version in go.mod
-          # (1.26+). Pinning latest because stable lint releases lag
-          # the bleeding-edge Go toolchain by months.
-          version: latest
-          args: --timeout=5m
+        run: $(go env GOPATH)/bin/golangci-lint run --timeout=5m
