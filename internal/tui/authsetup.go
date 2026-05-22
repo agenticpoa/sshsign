@@ -75,12 +75,11 @@ type authSetupModel struct {
 
 	// Custom constraint builder
 	addSubStep       addConstraintStep
-	newTypeCursor    int
-	newFieldInput    textinput.Model
-	newMinInput      textinput.Model
-	newMaxInput      textinput.Model
-	newAllowedInput  textinput.Model
-	newRequiredValue bool
+	newTypeCursor   int
+	newFieldInput   textinput.Model
+	newMinInput     textinput.Model
+	newMaxInput     textinput.Model
+	newAllowedInput textinput.Model
 }
 
 type addConstraintStep int

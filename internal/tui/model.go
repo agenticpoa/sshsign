@@ -117,10 +117,6 @@ func (m Model) View() string {
 	}
 }
 
-type navigateMsg struct {
-	screen screen
-}
-
 type statusMsg struct {
 	message string
 	isError bool

@@ -13,53 +13,81 @@ run:
 linters:
   default: none
   enable:
-    # Default linters that catch real bugs:
-    - errcheck
-    - govet         # printf format, struct tags, shadowing, etc.
+    # Bug-catchers (the core value of running lint):
+    - errcheck      # unchecked errors
+    - govet         # printf format, struct tags
     - ineffassign   # ineffectual assignments
     - staticcheck   # comprehensive static analysis
     - unused        # unused vars/funcs/types
-    # Extras worth running:
-    - bodyclose     # ResponseBody not closed
-    - gocritic      # broad set of opinionated checks (we'll tune)
-    - misspell      # common English typos in comments
     - nilerr        # returning nil when err is non-nil
+    # Narrow extras:
+    - bodyclose     # ResponseBody not closed (production code only)
+    - misspell      # common English typos in comments
     - unconvert     # unnecessary type conversions
+    - gocritic      # tuned tightly via disabled-tags below
 
   settings:
     errcheck:
-      # writeJSON deliberately ignores the encoder error; the response
-      # is best-effort and the caller has already decided to send
-      # something. Don't fight this.
+      # Patterns where the discard is deliberate. Each entry is either
+      # a function whose return value we intentionally ignore (writers
+      # to SSH sessions are best-effort; closing already-closed
+      # resources is fine; parsing legacy JSON in storage rows is
+      # well-formed by construction so unmarshal errors are ignored).
       exclude-functions:
         - (encoding/json.Encoder).Encode
+        - encoding/json.Unmarshal
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+        - fmt.Sscanf
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Tx).Rollback
       check-blank: false
 
     gocritic:
-      disabled-checks:
-        - ifElseChain        # we use if/else chains intentionally
-        - hugeParam          # signatures with big structs are fine
-        - paramTypeCombine   # readability trade-off
+      # Drop the style tag — too many opinionated checks for a
+      # first lint pass. Keep diagnostic (real bugs) and
+      # performance (real wins).
       enabled-tags:
         - diagnostic
         - performance
-        - style
+      disabled-checks:
+        - ifElseChain
+        - hugeParam
+        - paramTypeCombine
 
     govet:
-      enable:
-        - shadow
+      # Default vet checks are enabled implicitly. `shadow` is
+      # informational, surfaces 28 instances of the idiomatic
+      # `if err := ...; err != nil` pattern across the codebase,
+      # not worth fighting.
 
     misspell:
       locale: US
 
+    staticcheck:
+      # Disable the QF* quickfix family — these are stylistic
+      # suggestions (use tagged switch, drop embedded field selector,
+      # Fprintf vs WriteString+Sprintf) that don't catch bugs. Keep
+      # SA* (security advisories), ST* (style errors that are real),
+      # and S* (simplifications) on.
+      checks:
+        - all
+        - "-QF*"
+
   exclusions:
-    # Tests intentionally use t.Logf / Errorf with raw output; don't
-    # fight printf-shape checks there.
     rules:
+      # Tests discard errors and skip Close patterns liberally; the
+      # bug-catcher value is much lower in test code anyway.
       - path: _test\.go
+        linters:
+          - errcheck
+          - bodyclose
+          - gocritic
+      # The audit logger goroutine intentionally fires-and-forgets
+      # CloseSession during reconnect.
+      - path: internal/audit/immudb\.go
         linters:
           - errcheck
 

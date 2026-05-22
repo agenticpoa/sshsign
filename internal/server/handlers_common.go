@@ -2,7 +2,6 @@ package server
 
 import (
 	"crypto/ed25519"
-	"fmt"
 	"log"
 
 	"github.com/charmbracelet/ssh"
@@ -11,29 +10,6 @@ import (
 	apoacrypto "github.com/agenticpoa/sshsign/internal/crypto"
 	"github.com/agenticpoa/sshsign/internal/storage"
 )
-
-// requireSigningKey loads the signing key by ID and rejects the request
-// if it doesn't exist, doesn't belong to the caller (when ownerCheck is
-// non-empty), or has been revoked. On any reject path it writes the
-// error response and returns (nil, false); callers should `return`
-// immediately. ownerCheck="" skips ownership — used by approval flows
-// that load a key from a pending row without owning the key.
-func requireSigningKey(sess ssh.Session, sc *SessionContext, keyID, ownerCheck string) (*storage.SigningKey, bool) {
-	sk, err := storage.GetSigningKey(sess.Context(), sc.DB, keyID)
-	if err != nil || sk == nil {
-		writeJSON(sess, errorResponse{Error: fmt.Sprintf("signing key %s not found", keyID)})
-		return nil, false
-	}
-	if ownerCheck != "" && sk.OwnerID != ownerCheck {
-		writeJSON(sess, errorResponse{Error: "signing key not owned by you"})
-		return nil, false
-	}
-	if sk.RevokedAt != nil {
-		writeJSON(sess, errorResponse{Error: "signing key has been revoked"})
-		return nil, false
-	}
-	return sk, true
-}
 
 // decryptSigningKey unwraps the DEK and decrypts the wrapped ed25519
 // private key. Same reject contract as requireSigningKey. Callers must

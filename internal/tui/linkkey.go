@@ -25,7 +25,6 @@ type linkKeyModel struct {
 	labelInput textinput.Model
 	focus      linkKeyField
 	err        string
-	done       bool
 }
 
 func newLinkKeyModel(r *lipgloss.Renderer) linkKeyModel {

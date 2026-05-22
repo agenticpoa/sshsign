@@ -137,7 +137,7 @@ func (l *ImmuDBLogger) healthCheckLoop() {
 
 	for range ticker.C {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		err := l.client.HealthCheck(ctx)
+		err := l.client.HealthCheck(ctx) //nolint:staticcheck // ServerInfo isn't a drop-in replacement; revisit during the immudb client upgrade.
 		cancel()
 
 		wasHealthy := l.healthy.Load()

@@ -16,7 +16,6 @@ import (
 type auditLogModel struct {
 	entries []auditDisplayEntry
 	cursor  int
-	offset  int
 	db      *sql.DB
 	user    *storage.User
 }
