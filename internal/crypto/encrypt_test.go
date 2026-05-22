@@ -288,6 +288,100 @@ func TestDeriveKEKArgon2id_RejectsShortSalt(t *testing.T) {
 	}
 }
 
+// BenchmarkKEKRingNew measures the cost of building a production
+// KEKRing under the parameters in encrypt.go. The Argon2id derivation
+// is the dominant term; if someone bumps argon2Memory or argon2Time
+// the cost lands here.
+//
+// Reasonable production target: a single call should complete in
+// under one second on commodity hardware. Anything past ~2s starts
+// to look like the server is hung on a routine restart.
+//
+// Run with: go test -bench=BenchmarkKEKRingNew -benchtime=5x \
+//     ./internal/crypto/...
+//
+// The 5x is intentional — we don't need statistical noise reduction;
+// we need a stable single-run timing.
+func BenchmarkKEKRingNew(b *testing.B) {
+	secret := "benchmark-secret-thats-32-chars!"
+	salt := make([]byte, 32)
+	for i := range salt {
+		salt[i] = byte(i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ring, err := crypto.NewKEKRing(secret, salt)
+		if err != nil {
+			b.Fatalf("NewKEKRing: %v", err)
+		}
+		// Touch a field so the compiler doesn't dead-code the call.
+		if ring.CurrentAlgo() == "" {
+			b.Fatal("empty currentAlgo")
+		}
+	}
+}
+
+// BenchmarkDeriveKEKArgon2id isolates the Argon2id derivation so a
+// regression in NewKEKRing can be pinpointed to the KDF vs the wrap
+// of the legacy/MAC keys.
+func BenchmarkDeriveKEKArgon2id(b *testing.B) {
+	secret := "benchmark-secret-thats-32-chars!"
+	salt := make([]byte, 32)
+	for i := range salt {
+		salt[i] = byte(i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := crypto.DeriveKEKArgon2id(secret, salt)
+		if err != nil {
+			b.Fatalf("DeriveKEKArgon2id: %v", err)
+		}
+	}
+}
+
+// BenchmarkWrapDEK isolates the per-operation DEK wrap cost. Unlike
+// the KEK derivation this is on the hot path of every signing key
+// creation, so a regression here matters per-request, not just at
+// startup.
+func BenchmarkWrapDEK(b *testing.B) {
+	ring, err := crypto.NewKEKRingForTests("bench-secret")
+	if err != nil {
+		b.Fatalf("ring: %v", err)
+	}
+	dek := make([]byte, 32)
+	for i := range dek {
+		dek[i] = byte(i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, _, err := ring.WrapDEK(dek); err != nil {
+			b.Fatalf("WrapDEK: %v", err)
+		}
+	}
+}
+
+// BenchmarkComputePendingMAC measures the per-cosign MAC computation
+// cost. Cheap (HMAC-SHA256 over short canonical encoding), but the
+// benchmark documents the expected order of magnitude.
+func BenchmarkComputePendingMAC(b *testing.B) {
+	ring, err := crypto.NewKEKRingForTests("bench-secret")
+	if err != nil {
+		b.Fatalf("ring: %v", err)
+	}
+	binding := crypto.PendingBinding{
+		SigningKeyID: "ak_benchmark1234",
+		AuthTokenID:  "at_benchmark1234",
+		RequesterID:  "u_benchmark1234",
+		DocType:      "safe-agreement",
+		PayloadHash:  "sha256:abcdef0123456789",
+		Metadata:     `{"valuation_cap":10000000,"discount_rate":0.2}`,
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ring.ComputePendingMAC(binding)
+	}
+}
+
 func TestKEKRing_CloseRendersUnwrapInert(t *testing.T) {
 	// After Close, the ring's keys are all zeros. Encrypting a DEK
 	// with the now-zeroed current key and then trying to decrypt with
