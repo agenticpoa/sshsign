@@ -41,14 +41,28 @@ linters:
         - fmt.Fprintln
         - fmt.Sscanf
         - (*database/sql.DB).Close
+        - (*database/sql.DB).ExecContext  # RecordKeyUsage is best-effort metrics
         - (*database/sql.Rows).Close
         - (*database/sql.Tx).Rollback
+        - (golang.org/x/crypto/ssh.Client).Close
+        - (golang.org/x/crypto/ssh.Session).Close
+        - (*net/http.ResponseWriter).Write
+        - (net/http.ResponseWriter).Write
       check-blank: false
 
     gocritic:
       # Drop the style tag — too many opinionated checks for a
       # first lint pass. Keep diagnostic (real bugs) and
-      # performance (real wins).
+      # performance (real wins). Then turn off two specific
+      # diagnostics:
+      #
+      # - exitAfterDefer: log.Fatal/os.Exit in cmd/ entrypoints
+      #   intentionally trumps deferred Close; that's the standard
+      #   shutdown pattern when init fails.
+      # - rangeValCopy: copying small structs through range is a
+      #   micro-perf hint, not a bug. Optimizing the >20 hits would
+      #   require switching to indexed iteration everywhere; not
+      #   worth the readability hit.
       enabled-tags:
         - diagnostic
         - performance
@@ -56,6 +70,8 @@ linters:
         - ifElseChain
         - hugeParam
         - paramTypeCombine
+        - exitAfterDefer
+        - rangeValCopy
 
     govet:
       # Default vet checks are enabled implicitly. `shadow` is
@@ -67,14 +83,17 @@ linters:
       locale: US
 
     staticcheck:
-      # Disable the QF* quickfix family — these are stylistic
-      # suggestions (use tagged switch, drop embedded field selector,
-      # Fprintf vs WriteString+Sprintf) that don't catch bugs. Keep
-      # SA* (security advisories), ST* (style errors that are real),
-      # and S* (simplifications) on.
+      # Disable two stylistic families that aren't worth the noise on
+      # a 17k-line codebase that's never been linted:
+      #   QF*    quickfix suggestions (use tagged switch, etc.)
+      #   ST1000 package comment in every file — fine in principle,
+      #          but retrofitting 30+ files isn't a security/bug fix
+      #   ST1003 var naming style on a handful of legacy identifiers
       checks:
         - all
         - "-QF*"
+        - "-ST1000"
+        - "-ST1003"
 
   exclusions:
     rules:
