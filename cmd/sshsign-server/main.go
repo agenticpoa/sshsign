@@ -68,7 +68,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("connecting to immudb: %v", err)
 		}
-		defer immuLogger.Close()
+		defer func() { _ = immuLogger.Close() }()
 		auditLog = immuLogger
 		log.Printf("audit logging to immudb at %s:%d", addr, port)
 	} else {

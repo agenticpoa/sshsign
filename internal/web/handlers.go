@@ -254,7 +254,7 @@ func (s *Server) handlePostApproval(w http.ResponseWriter, r *http.Request) {
 	log.Printf("WEB_APPROVED pending %s by %s, key %s, envelope %s", pendingID, auth.GrantedBy, sk.KeyID, sealed.Hash[:16])
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":        "approved",
 		"pending_id":    ps.ID,
 		"key_id":        sk.KeyID,

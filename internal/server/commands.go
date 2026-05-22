@@ -136,8 +136,10 @@ func approvalDomain(sc *SessionContext) string {
 }
 
 func writeJSON(sess ssh.Session, v any) {
-	enc := json.NewEncoder(sess)
-	enc.Encode(v)
+	// Best-effort write. Encoding a Go struct to a closed SSH
+	// session yields a network error we can't act on — the caller
+	// has already decided what to send.
+	_ = json.NewEncoder(sess).Encode(v)
 }
 
 func hostedSessionID(negotiationID string) string {

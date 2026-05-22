@@ -466,7 +466,7 @@ func (m *authSetupModel) selectTemplate(tmpl *authTemplate) {
 // --- Update handlers ---
 
 func (m Model) updateAuthSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
+	switch msg := msg.(type) { //nolint:gocritic // type switch left wide for future message kinds
 	case tea.KeyMsg:
 		if msg.String() == "esc" {
 			// If editing a constraint inline, cancel the edit
@@ -1133,9 +1133,15 @@ func (m Model) handleCreateAuth() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// If editing an existing auth, revoke the old one
+	// If editing an existing auth, revoke the old one. A revoke
+	// failure shouldn't trump the just-created replacement; log it
+	// in-band so the user notices but proceed with the success
+	// navigation below.
 	if m.authSetup.replacingTokenID != "" {
-		storage.RevokeAuthorization(context.Background(), m.authSetup.db, m.authSetup.replacingTokenID)
+		if err := storage.RevokeAuthorization(context.Background(), m.authSetup.db, m.authSetup.replacingTokenID); err != nil {
+			m.authSetup.status = fmt.Sprintf("Created new auth, but failed to revoke old %s: %v", m.authSetup.replacingTokenID, err)
+			m.authSetup.isError = true
+		}
 	}
 
 	if m.authSetup.fromWizard {

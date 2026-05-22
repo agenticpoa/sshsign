@@ -144,7 +144,9 @@ func (m Model) executeApprovalAction() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.auditLogger != nil {
-			m.auditLogger.Log(audit.Entry{
+			// Best-effort: a logger failure here doesn't undo the
+			// already-resolved deny in storage. The deny stands.
+			_, _ = m.auditLogger.Log(audit.Entry{
 				UserID:             m.user.UserID,
 				SigningKeyID:       ps.SigningKeyID,
 				ActionType:         ps.DocType,
@@ -227,7 +229,9 @@ func (m Model) executeApprovalAction() (tea.Model, tea.Cmd) {
 	}
 
 	if m.auditLogger != nil {
-		m.auditLogger.Log(audit.Entry{
+		// Best-effort: the signature is already persisted to storage
+		// at this point; a logger failure shouldn't roll that back.
+		_, _ = m.auditLogger.Log(audit.Entry{
 			UserID:             m.user.UserID,
 			SigningKeyID:       sk.KeyID,
 			ActionType:         ps.DocType,

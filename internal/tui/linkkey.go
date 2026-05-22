@@ -46,7 +46,7 @@ func newLinkKeyModel(r *lipgloss.Renderer) linkKeyModel {
 }
 
 func (m Model) updateLinkKey(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
+	switch msg := msg.(type) { //nolint:gocritic // type switch left wide for future message kinds
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":

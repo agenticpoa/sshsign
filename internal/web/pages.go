@@ -402,7 +402,7 @@ func formatFieldLabel(field string) string {
 	if label, ok := knownLabels[field]; ok {
 		return label
 	}
-	return strings.ReplaceAll(strings.Title(strings.ReplaceAll(field, "_", " ")), " ", " ")
+	return strings.Title(strings.ReplaceAll(field, "_", " "))
 }
 
 func formatScope(scope string) string {

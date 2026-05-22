@@ -489,8 +489,10 @@ func (m Model) viewKeyDetail() string {
 		{"a", "add auth", hintAction},
 	}
 	if len(m.manageKeys.auths) > 0 {
-		hints = append(hints, hint{"e", "edit auth", hintAction})
-		hints = append(hints, hint{"r", "revoke auth", hintDanger})
+		hints = append(hints,
+			hint{"e", "edit auth", hintAction},
+			hint{"r", "revoke auth", hintDanger},
+		)
 	}
 	hints = append(hints, hint{"esc", "back", hintNav})
 	b.WriteString(m.buildHints(hints))

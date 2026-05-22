@@ -92,8 +92,12 @@ func evaluateAuth(auth storage.Authorization, req SignRequest, now time.Time) De
 		return d
 	}
 
-	// Check hard rules (deny if violated)
-	d.RulesChecked = append(auth.HardRules, auth.SoftRules...)
+	// Check hard rules (deny if violated). Build the combined list
+	// in a fresh slice so we don't mutate auth.HardRules' backing
+	// array if it happens to have spare capacity.
+	d.RulesChecked = make([]string, 0, len(auth.HardRules)+len(auth.SoftRules))
+	d.RulesChecked = append(d.RulesChecked, auth.HardRules...)
+	d.RulesChecked = append(d.RulesChecked, auth.SoftRules...)
 	if reason := checkHardRules(auth.HardRules, req); reason != "" {
 		d.DenialReason = "hard rule: " + reason
 		return d

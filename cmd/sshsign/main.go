@@ -112,13 +112,13 @@ func handleSign(namespace string) {
 	if err != nil {
 		fatal("connecting to %s: %v", addr, err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	session, err := client.NewSession()
 	if err != nil {
 		fatal("creating session: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	session.Stdin = bytes.NewReader(payload)
 
@@ -173,13 +173,13 @@ func handleVerify(namespace, sigFile string) {
 	if err != nil {
 		fatal("connecting to %s: %v", addr, err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	session, err := client.NewSession()
 	if err != nil {
 		fatal("creating session: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	session.Stdin = bytes.NewReader(payload)
 
