@@ -1,0 +1,79 @@
+# golangci-lint config for sshsign.
+#
+# Conservative starter set: enable the linters that catch real bugs,
+# disable noise. Tune up over time rather than enabling everything at
+# once and drowning in nolint comments.
+
+run:
+  timeout: 5m
+  # The race-instrumented tests are slow; the lint pipeline doesn't
+  # need to wait on them.
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    # Default linters that catch real bugs:
+    - errcheck     # unchecked errors
+    - gosimple     # idiomatic simplifications
+    - govet        # printf format, struct tags, shadowing, etc.
+    - ineffassign  # ineffectual assignments
+    - staticcheck  # comprehensive static analysis
+    - unused       # unused vars/funcs/types
+    # Extras worth running:
+    - bodyclose    # ResponseBody not closed
+    - gocritic     # broad set of opinionated checks (we'll tune)
+    - misspell     # common English typos in comments
+    - nilerr       # returning nil when err is non-nil
+    - unconvert    # unnecessary type conversions
+
+linters-settings:
+  errcheck:
+    # writeJSON deliberately ignores the encoder error because the
+    # response is best-effort; the caller has already decided to
+    # send something. Don't fight this.
+    exclude-functions:
+      - (encoding/json.Encoder).Encode
+      - fmt.Fprint
+      - fmt.Fprintf
+      - fmt.Fprintln
+    check-blank: false
+
+  gocritic:
+    # gocritic has dozens of checks; cherry-pick the ones that align
+    # with this codebase's style. Disable the bikeshed-y ones.
+    disabled-checks:
+      - ifElseChain        # we use if/else chains intentionally
+      - hugeParam          # signatures with big structs are fine
+      - paramTypeCombine   # readability trade-off
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+
+  govet:
+    # `shadow` is informational but useful; the rest are vet defaults.
+    enable:
+      - shadow
+
+  misspell:
+    locale: US
+
+issues:
+  # Stop after this many issues per linter. Forces us to fix the
+  # backlog rather than tolerate a wall of warnings.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  # Generated and vendored files don't need linting.
+  exclude-dirs:
+    - dist
+    - vendor
+
+  # Per-path exclusions for cases where the tradeoff is fine as-is.
+  exclude-rules:
+    # Tests intentionally use t.Logf / Errorf with raw output; don't
+    # fight the printf-shape checks there.
+    - path: _test\.go
+      linters:
+        - errcheck

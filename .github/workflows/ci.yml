@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build all packages
+        run: go build ./...
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go vet
+        run: go vet ./...
+      - name: Run tests with race detector
+        run: go test ./... -race -count=1 -timeout=5m
+
+  fuzz-smoke:
+    name: fuzz-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Short fuzz runs on the parser surface. Catches regressions in
+      # parseJSONArg / decodeB64JSON / fixBareJSONKeys without
+      # blocking CI on a long fuzz campaign. Longer runs should be
+      # scheduled or run on demand.
+      - name: Fuzz parseJSONArg
+        run: go test ./internal/server/... -run='^$' -fuzz=FuzzParseJSONArg -fuzztime=30s
+      - name: Fuzz decodeB64JSON
+        run: go test ./internal/server/... -run='^$' -fuzz=FuzzDecodeB64JSON -fuzztime=30s
+      - name: Fuzz fixBareJSONKeys
+        run: go test ./internal/server/... -run='^$' -fuzz=FuzzFixBareJSONKeys -fuzztime=30s
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62
+          args: --timeout=5m
